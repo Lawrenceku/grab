@@ -1,12 +1,68 @@
 {
-  "name": "grab_api",
+  "name": "grab-api",
   "version": "1.0.0",
-  "main": "main.js",
+  "main": "dist/index.js",
+  "type": "module",
+  "types": "dist/types/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "rollup -c",
+    "build:types": "tsc --emitDeclarationOnly",
+    "clean": "rimraf dist",
+    "test": "jest",
+    "lint": "eslint src --ext .ts",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "prepare": "npm run clean && npm run build",
+    "prepublishOnly": "npm test && npm run lint",
+    "preversion": "npm run lint",
+    "version": "npm run format && git add -A src",
+    "postversion": "git push && git push --tags"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": ""
+  "keywords": [
+    "http",
+    "xhr",
+    "ajax",
+    "promise",
+    "typescript",
+    "request",
+    "client",
+    "fetch",
+    "browser"
+  ],
+  "author": {
+    "name": "lawrence",
+    "email": "lawrencekunmilola@gmail.com",
+    "url": "https://bento.me/kingdev"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lawrenceku/grab.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lawrenceku/grab/issues"
+  },
+  "homepage": "https://github.com/lawrenceku/grab#readme",
+  "description": "",
+  "devDependencies": {
+    "@rollup/plugin-terser": "^0.4.4",
+    "@types/jest": "^29.5.14",
+    "@typescript-eslint/eslint-plugin": "^8.12.2",
+    "@typescript-eslint/parser": "^8.12.2",
+    "eslint": "^9.13.0",
+    "jest": "^29.7.0",
+    "prettier": "^3.3.3",
+    "rimraf": "^6.0.1",
+    "rollup-plugin-terser": "^7.0.2",
+    "rollup-plugin-typescript2": "^0.36.0",
+    "ts-jest": "^29.2.5",
+    "typescript": "^5.6.3"
+  },
+  "imports": {
+    ".": "./package.json"
+  }
 }
