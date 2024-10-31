@@ -1,1 +1,8 @@
+# Ignore JavaScript files
 *.js
+
+# Ignore HTML files
+*.html
+
+# Ignore the .gitignore file itself (optional)
+.gitignore
