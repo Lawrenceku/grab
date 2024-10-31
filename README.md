@@ -1,143 +1,99 @@
 # Grab API
 
-A new and improved wrapper for making HTTP requests, built to simplify request handling in JavaScript. `grab` enhances error handling, provides timeout support, and automatically manages JSON data, making it a powerful alternative to the Fetch API and XMLHttpRequest.
+A lightweight, Promise-based HTTP client for browser environments.
 
-## Features
-
-- **Flexible HTTP Methods**: Supports all common HTTP methods (`GET`, `POST`, `PUT`, `DELETE`, etc.) with strong typing to ensure valid requests.
-- **Automatic JSON Handling**: Automatically handles JSON response parsing, so you don’t need to handle JSON parsing on the receiving end.
-- **Timeout Support**: Includes a built-in timeout feature (default: 60 seconds), which can be disabled if not needed.
-- **Enhanced Error Management**: Differentiates between network errors and server responses, making debugging more straightforward.
-
-## Table of Contents
-
-1. [Installation](#installation)
-2. [Usage](#usage)
-3. [Parameters](#parameters)
-4. [Improvements Over Fetch API](#improvements-over-fetch-api)
-5. [Contribution](#contribution)
-
----
-
-### Installation
-
-Clone the repository and include the `grab.ts` file in your project:
+## Installation
 
 ```bash
-git clone <repository-url>
-cd <repository-name>
+npm install grab-api
 ```
 
-Or install it as a dependency if you’ve published it on a package manager:
+## Usage
 
-```bash
-npm install grab
-```
-
----
-
-### Usage
-
-The `grab` function allows you to make HTTP requests with just a few parameters. Here’s a quick example to get you started.
+### Basic GET Request
 
 ```typescript
-import grab from './grab';
+import { grab } from 'grab-api';
 
-// Example usage of a GET request
-grab('GET', { url: 'https://api.example.com/data' })
-  .then(response => console.log(response))
-  .catch(error => console.error(error));
-
-// Example usage of a POST request with data and custom timeout
-grab('POST', {
-    url: 'https://api.example.com/data',
-    param: { name: 'Lawrence', age: 25 },
-    timed: true,
+// Simple GET request
+grab('GET', { 
+  url: 'https://api.example.com/data' 
 })
-  .then(response => console.log(response))
+  .then(data => console.log(data))
   .catch(error => console.error(error));
+
+// GET request with parameters
+grab('GET', { 
+  url: 'https://api.example.com/search',
+  params: { q: 'search term' }
+})
+  .then(data => console.log(data));
+
+// POST request with body
+grab('POST', { 
+  url: 'https://api.example.com/users',
+  body: { name: 'John Doe', email: 'john@example.com' }
+})
+  .then(data => console.log(data));
 ```
 
----
+## API Reference
 
-### Parameters
+### `grab<T>(method: HttpMethods, config: RequestConfig): Promise<T>`
 
-#### `grab<T>(method: HttpMethods, data: RequestData): Promise<T>`
+#### Parameters
+- `method`: HTTP method (GET, POST, PUT, DELETE, etc.)
+- `config`: Request configuration object
+  - `url`: Target URL (required)
+  - `params`: Query parameters (optional)
+  - `body`: Request body (optional)
+  - `headers`: Custom headers (optional)
+  - `timeout`: Request timeout in ms (default: 60000)
+  - `responseType`: XMLHttpRequest response type (default: 'json')
 
-- **`method`** (required):  
-  Type: `HttpMethods`  
-  The HTTP method for the request, e.g., `GET`, `POST`, `PUT`, `DELETE`, etc.
+## Contribution
 
-- **`data`** (required):  
-  Type: `RequestData`  
-  An object containing the following properties:
-  
-  - **`url`** (string): The URL for the request.
-  - **`param`** (optional, any): The data to send with the request (e.g., for POST requests). Automatically stringified if provided.
-  - **`timed`** (optional, boolean): Enables timeout if set to `true`. Defaults to `true`, with a 60-second timeout duration.
+Contributions are welcome! Here are some steps to help you get started:
 
----
+1. **Fork the repository**: Click the "Fork" button at the top right of the repository page.
+   
+2. **Clone your fork**: Use the following command to clone your fork to your local machine:
 
-### Improvements Over Fetch API
-
-The `grab` function enhances the Fetch API and XMLHttpRequest in the following ways:
-
-1. **Timeout Handling**: Unlike the Fetch API, which lacks native timeout support, `grab` provides built-in timeout functionality that defaults to 60 seconds, preventing requests from hanging indefinitely.
-  
-2. **Automatic JSON Parsing**: `grab` automatically parses JSON responses, saving you the need to manually parse `JSON.parse` in your code. This is similar to Axios and makes the API easier to work with.
-  
-3. **Simplified Error Management**: `grab` distinguishes between network errors and non-2xx HTTP status codes, providing clear error messages. This makes it easier to debug both network and server issues.
-  
-4. **Strongly Typed HTTP Methods**: Enforces type safety on HTTP methods, reducing potential errors due to typos and unsupported HTTP verbs.
-
----
-
-### Contribution
-
-We welcome contributions! To contribute:
-
-1. **Fork the Repository**:  
-   Fork the repository to your GitHub account.
-
-2. **Clone the Repository**:  
-   Clone your fork to your local machine.
    ```bash
-   git clone https://github.com/your-username/grab.git
-   cd grab
+   git clone https://github.com/your-username/grab-api.git
    ```
 
-3. **Create a New Branch**:  
-   Create a new branch for your feature or bug fix.
+3. **Create a new branch**: It's a good practice to create a new branch for your changes. Use the command below to create a new branch:
+
    ```bash
-   git checkout -b feature-or-bugfix-branch
+   git checkout -b your-feature-branch
    ```
 
-4. **Make Changes**:  
-   Implement your feature or fix.
+4. **Make your changes**: Implement your feature or fix the issue you want to address.
 
-5. **Run Tests** (if applicable):  
-   Ensure your changes pass all tests and do not break any existing functionality.
+5. **Run tests**: If applicable, make sure all tests pass. You can run tests with:
 
-6. **Commit and Push**:  
+   ```bash
+   npm test
+   ```
+
+6. **Commit your changes**: Use the following commands to stage and commit your changes:
+
    ```bash
    git add .
-   git commit -m "Describe your changes"
-   git push origin feature-or-bugfix-branch
+   git commit -m "Description of your changes"
    ```
 
-7. **Create a Pull Request**:  
-   Submit a pull request to the main repository. Please include a description of your changes and reference any relevant issues.
+7. **Push to your fork**: Push your changes back to your fork on GitHub:
 
----
+   ```bash
+   git push origin your-feature-branch
+   ```
 
-### License
+8. **Create a pull request**: Go to the original repository and click on "New Pull Request." Select your branch and submit the pull request for review.
 
-This project is licensed under the MIT License.
+9. **Discuss and update**: If feedback is provided, feel free to make additional changes to your branch and push them. The pull request will automatically update.
 
----
+## License
 
-### Author
-
-Lawrence
-
----
+MIT License
