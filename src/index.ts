@@ -139,7 +139,7 @@ function grabNode<T>(method: HttpMethods, url: string, body: any, headers: Recor
 
         // Add timeout handling
         req.setTimeout(timeout, () => {
-            req.abort()
+            req.destroy()
             reject(new Error(`Request timeout after ${timeout}ms`))
         })
     })

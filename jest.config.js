@@ -2,11 +2,14 @@
 export default {
   preset: 'ts-jest',
   testEnvironment: 'jsdom',
+  testMatch: [
+    '**/__tests__/**/*.ts',  // Matches test files in __tests__ directories
+    '**/?(*.)+(spec|test).[jt]s?(x)',  // Matches files with .test.ts or .spec.ts
+  ],
   roots: ['<rootDir>/src', '<rootDir>/tests'],
   transform: {
       '^.+\\.tsx?$': 'ts-jest'
   },
-  testRegex: '(/__tests__/.*|(\\.|/)(test|spec))\\.(ts)$',
   moduleFileExtensions: ['ts', 'tsx', 'js', 'jsx', 'json', 'node'],
   collectCoverage: true,
   coverageDirectory: 'coverage',
