@@ -1,3 +1,6 @@
+import { request as httpsRequest } from 'https'
+import { URL } from 'url'
+
 // Types
 type HttpMethods = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD' | 'CONNECT' | 'TRACE'
 
@@ -16,7 +19,7 @@ interface GrabError extends Error {
 }
 
 /**
- * A lightweight and improved alternative to traditional promise-based HTTP clients
+ * A lightweight and improved alternative to fetch api and axios
  * @param method The HTTP method to use
  * @param config Request configuration
  * @returns Promise that resolves with the response data
@@ -37,9 +40,19 @@ function grab<T>(method: HttpMethods = 'GET', config: RequestConfig): Promise<T>
         ? `${url}${url.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`
         : url
 
-    const requestPromise = new Promise<T>((resolve, reject) => {
+    if (typeof window !== 'undefined' && window.XMLHttpRequest) {
+        // Browser environment
+        return grabBrowser<T>(method, finalUrl, body, headers, timeout, responseType)
+    } else {
+        // Node.js environment
+        return grabNode<T>(method, finalUrl, body, headers, timeout)
+    }
+}
+
+function grabBrowser<T>(method: HttpMethods, url: string, body: any, headers: Record<string, string>, timeout: number, responseType: XMLHttpRequestResponseType): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
         const xhr = new XMLHttpRequest()
-        xhr.open(method, finalUrl)
+        xhr.open(method, url)
         xhr.responseType = responseType
 
         // Set default headers
@@ -74,20 +87,62 @@ function grab<T>(method: HttpMethods = 'GET', config: RequestConfig): Promise<T>
         } else {
             xhr.send()
         }
-    })
 
-    // Add timeout handling
-    if (timeout) {
-        const timeoutPromise = new Promise<never>((_, reject) => {
+        // Add timeout handling
+        if (timeout) {
             setTimeout(() => {
+                xhr.abort()
                 reject(new Error(`Request timeout after ${timeout}ms`))
             }, timeout)
+        }
+    })
+}
+
+function grabNode<T>(method: HttpMethods, url: string, body: any, headers: Record<string, string>, timeout: number): Promise<T> {
+    return new Promise<T>((resolve, reject) => {
+        const urlObj = new URL(url)
+        const options = {
+            method,
+            headers,
+            timeout
+        }
+
+        const req = httpsRequest(urlObj, options, (res) => {
+            let data = ''
+            res.on('data', (chunk) => {
+                data += chunk
+            })
+
+            res.on('end', () => {
+                if (res.statusCode && res.statusCode >= 200 && res.statusCode < 300) {
+                    resolve(JSON.parse(data))
+                } else {
+                    const error = new Error(`Request failed with status: ${res.statusCode}`) as GrabError
+                    error.status = res.statusCode
+                    error.response = data
+                    reject(error)
+                }
+            })
         })
 
-        return Promise.race([requestPromise, timeoutPromise])
-    }
+        req.on('error', (err) => {
+            reject(new Error(`Network error occurred: ${err.message}`))
+        })
 
-    return requestPromise
+        // Send the request
+        if (body) {
+            req.setHeader('Content-Type', 'application/json')
+            req.write(JSON.stringify(body))
+        }
+
+        req.end()
+
+        // Add timeout handling
+        req.setTimeout(timeout, () => {
+            req.abort()
+            reject(new Error(`Request timeout after ${timeout}ms`))
+        })
+    })
 }
 
 export { grab, type HttpMethods, type RequestConfig, type GrabError }
