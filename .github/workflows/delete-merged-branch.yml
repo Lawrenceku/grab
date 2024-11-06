@@ -1,0 +1,24 @@
+name: Delete Merged Branch
+
+on:
+  pull_request:
+    types:
+      - closed
+
+jobs:
+  delete_branch:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if pull request was merged
+        if: github.event.pull_request.merged == true
+        run: |
+          source_branch=$(jq --raw-output .pull_request.head.ref "$GITHUB_EVENT_PATH")
+          base_branch=$(jq --raw-output .pull_request.base.ref "$GITHUB_EVENT_PATH")
+
+          if [[ $source_branch != "main" && $source_branch != "dev" ]]; then
+            echo "Deleting branch: $source_branch"
+            git push origin --delete "$source_branch"
+          else
+            echo "Branch $source_branch is not deleted since it's 'main' or 'dev'."
+          fi
