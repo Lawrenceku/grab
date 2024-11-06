@@ -1,4 +1,4 @@
-import typescript from 'rollup-plugin-typescript2';
+import typescript from '@rollup/plugin-typescript';
 import { terser } from 'rollup-plugin-terser';
 import pkg from './package.json';
 import commonjs from '@rollup/plugin-commonjs';
@@ -62,5 +62,5 @@ export default {
     ...Object.keys(pkg.dependencies || {}), // Exclude dependencies from the bundle
     ...Object.keys(pkg.peerDependencies || {}),
   ],
-  plugins: [commonjs()]
+  plugins: [commonjs(),typescript()]
 };
