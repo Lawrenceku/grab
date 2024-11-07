@@ -1,6 +1,8 @@
-# Grab API
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="Logo" width="400" style="margin-bottom: 15px;"/>
+  <p style="font-size: 16px; font-weight: bold; margin-bottom: 25px;">A lightweight, Promise-based HTTP client for browser environments.</p>
+</div>
 
-A lightweight, Promise-based HTTP client for browser environments.
 
 ## Installation
 
