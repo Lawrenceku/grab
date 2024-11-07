@@ -1,7 +1,19 @@
-<div align="center">
+<br>
+<div align="center" style="margin-bottom:1000px;">
   <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="Logo" width="400" style="margin-bottom: 15px;"/>
-  <p style="font-size: 16px; font-weight: bold; margin-bottom: 25px;">A lightweight, Promise-based HTTP client for browser environments.</p>
+  <p style="font-size: 16px; font-weight: bold; margin-bottom: 25px;">A lightweight, Promise-based HTTP client for browser and Nodejs environments.</p>
 </div>
+
+<div align="center">
+  
+[![npm version](https://img.shields.io/npm/v/grab-api.svg?style=flat-square)](https://www.npmjs.org/package/grab-api)
+[![Build status](https://img.shields.io/github/actions/workflow/status/grab-api/grab-api/ci.yml?branch=v1.x&label=CI&logo=github&style=flat-square)](https://github.com/lawrenceku/grab/actions/workflows/ci.yml)
+[![install size](https://img.shields.io/badge/dynamic/json?url=https://packagephobia.com/v2/api.json?p=grab-api&query=$.install.pretty&label=install%20size&style=flat-square)](https://packagephobia.now.sh/result?p=grab-api)
+[![npm downloads](https://img.shields.io/npm/dm/grab-api.svg?style=flat-square)](https://npm-stat.com/charts.html?package=grab-api)
+[![Known Vulnerabilities](https://snyk.io/test/npm/grab-api/badge.svg)](https://snyk.io/test/npm/grab-api)
+
+</div>
+<br><br>
 
 
 ## Installation
