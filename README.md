@@ -1,6 +1,6 @@
 <br>
 <div align="center" style="margin-bottom:1000px;">
-  <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="Logo" width="400" style="margin-bottom: 15px;"/>
+  <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="Logo" width="250" style="margin-bottom: 15px;"/>
   <p style="font-size: 16px; font-weight: bold; margin-bottom: 25px;">A lightweight, Promise-based HTTP client for browser and Nodejs environments.</p>
 </div>
 
