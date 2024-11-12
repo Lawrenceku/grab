@@ -15,7 +15,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-      - run: npm ci
+      - run: npm ci --verbose
       # - run: npm test
 
   publish-gpr:
@@ -33,6 +33,6 @@ jobs:
           scope: "@name"
       - run: node gpr-hack.js  # Ensure this script is documented
       - run: npm run build
-      - run: npm publish
+      - run: npm publish --verbose
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
