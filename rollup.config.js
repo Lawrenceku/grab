@@ -1,41 +1,40 @@
-import typescript from '@rollup/plugin-typescript';
 import { terser } from 'rollup-plugin-terser';
 import pkg from './package.json';
 import commonjs from '@rollup/plugin-commonjs';
 import polyfillNode from 'rollup-plugin-polyfill-node';
-import resolve from '@rollup/plugin-node-resolve'; // Added resolve plugin
+import resolve from '@rollup/plugin-node-resolve';
 
 export default {
   input: 'src/index.ts',
   output: [
     {
-      file: 'dist/index.js', // CommonJS format
+      file: 'dist/index.js',
       format: 'cjs',
       exports: 'named',
       sourcemap: true,
       globals: {
-        https: 'https',   // Specify global variable names
+        https: 'https',
         url: 'url',
       },
     },
     {
-      file: pkg.module || 'dist/index.esm.js', // Default to a specific file if pkg.module is not defined
+      file: pkg.module || 'dist/index.esm.js',
       format: 'es',
       exports: 'named',
       sourcemap: true,
       globals: {
-        https: 'https',   // Specify global variable names
+        https: 'https',
         url: 'url',
       },
     },
     {
-      file: 'dist/grab-api.umd.js', // UMD format
+      file: 'dist/grab-api.umd.js',
       format: 'umd',
-      name: 'GrabAPI', // Global variable name for UMD
+      name: 'GrabAPI',
       exports: 'named',
       sourcemap: true,
       globals: {
-        https: 'https',   // Specify global variable names
+        https: 'https',
         url: 'url',
       },
     },
@@ -43,24 +42,14 @@ export default {
   plugins: [
     polyfillNode(),
     resolve({
-      preferBuiltins: true, // To prefer built-in Node modules
+      preferBuiltins: true,
     }),
-    typescript({
-      clean: true,
-      useTsconfigDeclarationDir: true,
-      tsconfigOverride: {
-        compilerOptions: {
-          declaration: true,
-          declarationDir: 'dist/types',
-        },
-      },
-    }),
-    terser(), // Minify the output
+    commonjs(),
+    terser(),
   ],
   external: [
     'https', 'url', 'rollup-plugin-polyfill-node',
-    ...Object.keys(pkg.dependencies || {}), // Exclude dependencies from the bundle
+    ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.peerDependencies || {}),
   ],
-  plugins: [commonjs(),typescript()]
 };
