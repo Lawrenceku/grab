@@ -1,8 +1,13 @@
-import { terser } from 'rollup-plugin-terser';
-import pkg from './package.json';
+import { readFileSync } from 'node:fs';
+import typescript from '@rollup/plugin-typescript';
+import terser from '@rollup/plugin-terser';
 import commonjs from '@rollup/plugin-commonjs';
 import polyfillNode from 'rollup-plugin-polyfill-node';
 import resolve from '@rollup/plugin-node-resolve';
+
+const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
+
+const globals = { https: 'https', url: 'url' };
 
 export default {
   input: 'src/index.ts',
@@ -12,20 +17,12 @@ export default {
       format: 'cjs',
       exports: 'named',
       sourcemap: true,
-      globals: {
-        https: 'https',
-        url: 'url',
-      },
     },
     {
       file: pkg.module || 'dist/index.esm.js',
       format: 'es',
       exports: 'named',
       sourcemap: true,
-      globals: {
-        https: 'https',
-        url: 'url',
-      },
     },
     {
       file: 'dist/grab-api.umd.js',
@@ -33,22 +30,22 @@ export default {
       name: 'GrabAPI',
       exports: 'named',
       sourcemap: true,
-      globals: {
-        https: 'https',
-        url: 'url',
-      },
+      globals,
     },
   ],
   plugins: [
+    typescript({ tsconfig: './tsconfig.json' }),
     polyfillNode(),
     resolve({
       preferBuiltins: true,
+      extensions: ['.ts', '.js'],
     }),
     commonjs(),
     terser(),
   ],
   external: [
-    'https', 'url', 'rollup-plugin-polyfill-node',
+    'https',
+    'url',
     ...Object.keys(pkg.dependencies || {}),
     ...Object.keys(pkg.peerDependencies || {}),
   ],

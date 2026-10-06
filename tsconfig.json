@@ -1,16 +1,19 @@
 {
   "compilerOptions": {
-    "target": "ES6",
-    "module": "ES2020",      // Change this to ES2020 or ESNext
+    "target": "ES2019",
+    "module": "ESNext",
     "moduleResolution": "node",
+    "lib": [
+      "ES2019",
+      "DOM"
+    ],
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "declaration": true,
-    "declarationDir": "dist/types",
-    "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src/**/*"]
+  "include": [
+    "src/**/*"
+  ]
 }
