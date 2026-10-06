@@ -98,6 +98,15 @@ class GrabInstance {
 
     private defaultTransformRequest(data: any, headers: Record<string, string>): any {
         if (typeof data === 'object' && data !== null) {
+            if (
+                (typeof FormData !== 'undefined' && data instanceof FormData) ||
+                (typeof Blob !== 'undefined' && data instanceof Blob) ||
+                (typeof ArrayBuffer !== 'undefined' && (data instanceof ArrayBuffer || ArrayBuffer.isView(data))) ||
+                (typeof URLSearchParams !== 'undefined' && data instanceof URLSearchParams) ||
+                (typeof data.pipe === 'function')
+            ) {
+                return data
+            }
             headers['Content-Type'] = headers['Content-Type'] || 'application/json'
             return JSON.stringify(data)
         }
@@ -152,11 +161,23 @@ class GrabInstance {
             transformedData = transform(transformedData, headers)
         }
 
+        let promise: Promise<any>
+        
         if (typeof window !== 'undefined' && window.XMLHttpRequest) {
-            return this.executeBrowserRequest<T>(method, finalUrl, transformedData, headers, timeout, responseType || 'json', signal, onUploadProgress, onDownloadProgress, validateStatus, finalConfig)
+            promise = this.executeBrowserRequest<T>(method, finalUrl, transformedData, headers, timeout, responseType || 'json', signal, onUploadProgress, onDownloadProgress, validateStatus, finalConfig)
         } else {
-            return this.executeNodeRequest<T>(method, finalUrl, transformedData, headers, timeout, signal, validateStatus, finalConfig)
+            promise = this.executeNodeRequest<T>(method, finalUrl, transformedData, headers, timeout, signal, validateStatus, finalConfig)
         }
+
+        // Apply response interceptors
+        for (const interceptor of this.responseInterceptors.getHandlers()) {
+            promise = promise.then(
+                interceptor.fulfilled ? (res) => interceptor.fulfilled!(res) : undefined,
+                interceptor.rejected ? (err) => interceptor.rejected!(err) : undefined
+            )
+        }
+
+        return promise
     }
 
     private executeBrowserRequest<T>(
@@ -195,19 +216,28 @@ class GrabInstance {
                 xhr.onprogress = onDownloadProgress
             }
 
+            let timeoutId: any
+            const abortListener = () => {
+                xhr.abort()
+                const error = new Error('Request aborted') as GrabError
+                error.code = 'ABORTED'
+                error.config = config
+                reject(error)
+            }
+
             // Handle abort signal
             if (signal) {
-                signal.addEventListener('abort', () => {
-                    xhr.abort()
-                    const error = new Error('Request aborted') as GrabError
-                    error.code = 'ABORTED'
-                    error.config = config
-                    reject(error)
-                })
+                signal.addEventListener('abort', abortListener)
+            }
+
+            const cleanup = () => {
+                if (timeoutId) clearTimeout(timeoutId)
+                if (signal) signal.removeEventListener('abort', abortListener)
             }
 
             // Handle response
             xhr.onload = () => {
+                cleanup()
                 const response: Response<T> = {
                     data: xhr.response,
                     status: xhr.status,
@@ -224,14 +254,7 @@ class GrabInstance {
                     }
                     response.data = transformedData
 
-                    // Apply response interceptors
-                    let finalResponse = response
-                    for (const interceptor of this.responseInterceptors.getHandlers()) {
-                        if (interceptor.fulfilled) {
-                            finalResponse = interceptor.fulfilled(finalResponse) as Response<T>
-                        }
-                    }
-                    resolve(finalResponse)
+                    resolve(response)
                 } else {
                     const error = new Error(`Request failed with status: ${xhr.status}`) as GrabError
                     error.status = xhr.status
@@ -244,6 +267,7 @@ class GrabInstance {
 
             // Handle network errors
             xhr.onerror = () => {
+                cleanup()
                 const error = new Error("Network error occurred") as GrabError
                 error.config = config
                 error.isAxiosError = true
@@ -255,7 +279,7 @@ class GrabInstance {
 
             // Add timeout handling
             if (timeout && timeout > 0) {
-                setTimeout(() => {
+                timeoutId = setTimeout(() => {
                     xhr.abort()
                     const error = new Error(`Request timeout after ${timeout}ms`) as GrabError
                     error.code = 'TIMEOUT'
@@ -285,6 +309,11 @@ class GrabInstance {
                 timeout: timeout || undefined
             }
 
+            let abortListener: () => void
+            const cleanup = () => {
+                if (signal && abortListener) signal.removeEventListener('abort', abortListener)
+            }
+
             const req = httpsRequest(urlObj, options, (res) => {
                 let responseData = ''
                 res.on('data', (chunk) => {
@@ -292,6 +321,7 @@ class GrabInstance {
                 })
 
                 res.on('end', () => {
+                    cleanup()
                     const response: Response<T> = {
                         data: responseData as any,
                         status: res.statusCode || 0,
@@ -308,14 +338,7 @@ class GrabInstance {
                         }
                         response.data = transformedData
 
-                        // Apply response interceptors
-                        let finalResponse = response
-                        for (const interceptor of this.responseInterceptors.getHandlers()) {
-                            if (interceptor.fulfilled) {
-                                finalResponse = interceptor.fulfilled(finalResponse) as Response<T>
-                            }
-                        }
-                        resolve(finalResponse)
+                        resolve(response)
                     } else {
                         const error = new Error(`Request failed with status: ${response.status}`) as GrabError
                         error.status = response.status
@@ -328,22 +351,25 @@ class GrabInstance {
             })
 
             req.on('error', (err) => {
+                cleanup()
                 const error = new Error(`Network error occurred: ${err.message}`) as GrabError
                 error.config = config
                 error.isAxiosError = true
                 reject(error)
             })
 
+            abortListener = () => {
+                req.destroy()
+                const error = new Error('Request aborted') as GrabError
+                error.code = 'ABORTED'
+                error.config = config
+                error.isAxiosError = true
+                reject(error)
+            }
+
             // Handle abort signal
             if (signal) {
-                signal.addEventListener('abort', () => {
-                    req.destroy()
-                    const error = new Error('Request aborted') as GrabError
-                    error.code = 'ABORTED'
-                    error.config = config
-                    error.isAxiosError = true
-                    reject(error)
-                })
+                signal.addEventListener('abort', abortListener)
             }
 
             // Send the request
