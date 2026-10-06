@@ -1,5 +1,8 @@
 import { request as httpsRequest } from 'https'
+import { request as httpRequest } from 'http'
 import { URL } from 'url'
+import * as zlib from 'zlib'
+import { Buffer } from 'buffer'
 
 // Types
 type HttpMethods = 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH' | 'OPTIONS' | 'HEAD' | 'CONNECT' | 'TRACE'
@@ -149,11 +152,30 @@ class GrabInstance {
             finalUrl = baseURL.replace(/\/+$/, '') + '/' + finalUrl.replace(/^\/+/, '')
         }
         if (params) {
-            finalUrl += `${finalUrl.includes('?') ? '&' : '?'}${new URLSearchParams(params)}`
+            const searchParams = new URLSearchParams()
+            const buildParams = (obj: any, prefix?: string) => {
+                if (obj === null || obj === undefined) return
+                if (typeof obj === 'object') {
+                    if (Array.isArray(obj)) {
+                        obj.forEach((v) => buildParams(v, prefix ? `${prefix}[]` : ''))
+                    } else if (obj instanceof Date) {
+                        searchParams.append(prefix!, obj.toISOString())
+                    } else {
+                        Object.keys(obj).forEach(k => buildParams(obj[k], prefix ? `${prefix}[${k}]` : k))
+                    }
+                } else {
+                    searchParams.append(prefix!, String(obj))
+                }
+            }
+            buildParams(params)
+            const query = searchParams.toString()
+            if (query) {
+                finalUrl += `${finalUrl.includes('?') ? '&' : '?'}${query}`
+            }
         }
 
         // Use data or body
-        const requestData = data || body
+        const requestData = data ?? body
 
         // Apply request transforms
         let transformedData = requestData
@@ -299,7 +321,8 @@ class GrabInstance {
         timeout: number | undefined,
         signal: AbortSignal | undefined,
         validateStatus: ((status: number) => boolean) | undefined,
-        config: RequestConfig
+        config: RequestConfig,
+        redirectCount: number = 0
     ): Promise<Response<T>> {
         return new Promise<Response<T>>((resolve, reject) => {
             const urlObj = new URL(url)
@@ -314,14 +337,46 @@ class GrabInstance {
                 if (signal && abortListener) signal.removeEventListener('abort', abortListener)
             }
 
-            const req = httpsRequest(urlObj, options, (res) => {
-                let responseData = ''
-                res.on('data', (chunk) => {
-                    responseData += chunk
+            const requestFn = urlObj.protocol === 'http:' ? httpRequest : httpsRequest
+            
+            const hasAcceptEncoding = Object.keys(options.headers).some(k => k.toLowerCase() === 'accept-encoding')
+            if (!hasAcceptEncoding) {
+                options.headers['Accept-Encoding'] = 'gzip, deflate'
+            }
+
+            const req = requestFn(urlObj, options, (res) => {
+                if ([301, 302, 303, 307, 308].includes(res.statusCode || 0) && res.headers.location) {
+                    if (redirectCount >= 5) {
+                        cleanup()
+                        return reject(new Error('Too many redirects') as GrabError)
+                    }
+                    cleanup()
+                    let redirectUrl = res.headers.location
+                    if (!redirectUrl.startsWith('http')) {
+                        redirectUrl = new URL(redirectUrl, url).toString()
+                    }
+                    resolve(this.executeNodeRequest(method, redirectUrl, data, headers, timeout, signal, validateStatus, config, redirectCount + 1))
+                    return
+                }
+
+                let stream: any = res
+                const encoding = res.headers['content-encoding']
+                if (encoding === 'gzip' || encoding === 'deflate') {
+                    stream = res.pipe(zlib.createUnzip())
+                    stream.on('error', (err: any) => {
+                        cleanup()
+                        reject(err)
+                    })
+                }
+
+                const chunks: Buffer[] = []
+                stream.on('data', (chunk: any) => {
+                    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk)
                 })
 
-                res.on('end', () => {
+                stream.on('end', () => {
                     cleanup()
+                    const responseData = Buffer.concat(chunks).toString('utf8')
                     const response: Response<T> = {
                         data: responseData as any,
                         status: res.statusCode || 0,
@@ -396,9 +451,13 @@ class GrabInstance {
         const headers: Record<string, string> = {}
         const pairs = headersString.trim().split('\n')
         pairs.forEach(pair => {
-            const [key, value] = pair.split(': ')
-            if (key && value) {
-                headers[key.toLowerCase()] = value
+            const index = pair.indexOf(':')
+            if (index > -1) {
+                const key = pair.substring(0, index).trim().toLowerCase()
+                const value = pair.substring(index + 1).trim()
+                if (key && value) {
+                    headers[key] = value
+                }
             }
         })
         return headers
