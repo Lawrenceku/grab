@@ -101,6 +101,7 @@ export const fetchAdapter: Adapter = async <T = any>(
       headers,
       body,
       signal,
+      redirect: config.redirect || 'follow',
     });
 
     cleanup();

@@ -42,14 +42,16 @@ export interface InstanceConfig {
   auth?: InstanceAuth;
   /** Request allowlist (methods, path globs, redirect hosts). */
   allow?: AllowConfig;
-  /** Default headers merged into every request. */
-  headers?: Record<string, string>;
+  /** Default headers merged into every request. Supports { env: 'VAR_NAME' }. */
+  headers?: Record<string, string | { env: string }>;
   /** Default request timeout in milliseconds. */
   timeout?: number;
   /** Max response body bytes before truncation (overrides global). */
   maxResponseBytes?: number;
   /** Max requests per minute (overrides global). */
   rateLimitPerMin?: number;
+  /** If true, only read-only methods (GET, HEAD, OPTIONS) are permitted. */
+  readOnly?: boolean;
 }
 
 /** Global limits applied as defaults across all instances. */
@@ -69,14 +71,17 @@ export interface GlobalLimits {
 export interface GrabAgentConfig {
   instances: Record<string, InstanceConfig>;
   limits?: GlobalLimits;
+  /** Path to append JSONL audit logs. Optional. */
+  auditLogPath?: string;
 }
 
 /** Safe instance info returned by listInstances (no secrets). */
 export interface InstanceInfo {
   name: string;
   baseURL: string;
-  methods?: HttpMethods[];
+  methods?: (HttpMethods | string)[];
   paths?: string[];
+  readOnly?: boolean;
 }
 
 /** Options for shaping agent responses. */
@@ -92,4 +97,21 @@ export interface ShapedData {
   data: any;
   truncated: boolean;
   originalBytes: number;
+  hint?: string;
 }
+
+/** Entry written to JSONL audit log. */
+export interface AuditLogEntry {
+  timestamp: string;
+  instance: string;
+  method: string;
+  url: string;
+  headers: Record<string, string>;
+  body?: any;
+  status?: number;
+  durationMs: number;
+  truncated?: boolean;
+  bytes?: number;
+  error?: string;
+}
+

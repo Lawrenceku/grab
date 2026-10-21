@@ -28,12 +28,23 @@ describe('agent/response', () => {
       expect((result.data as Buffer).length).toBe(30);
     });
 
-    it('truncates JSON objects when serialized representation exceeds limit', () => {
+    it('truncates JSON objects structurally when serialized representation exceeds limit', () => {
       const obj = { message: 'long message '.repeat(50) };
       const result = truncateResponse(obj, 100);
       expect(result.truncated).toBe(true);
-      expect(typeof result.data).toBe('string');
-      expect((result.data as string)).toContain('[TRUNCATED');
+      expect(typeof result.data).toBe('object');
+      expect(result.data.message).toContain('[clipped]');
+      expect(result.hint).toContain('fields');
+    });
+
+    it('truncates arrays structurally keeping first items', () => {
+      const items = Array.from({ length: 50 }, (_, i) => ({ id: i, name: `Item ${i}` }));
+      const result = truncateResponse(items, 150);
+      expect(result.truncated).toBe(true);
+      expect(Array.isArray(result.data)).toBe(true);
+      expect(result.data.length).toBeLessThan(items.length);
+      expect(result.originalBytes).toBeGreaterThan(150);
+      expect(result.hint).toContain('fields');
     });
 
     it('returns unmodified data if maxBytes <= 0 or not exceeded', () => {
@@ -124,8 +135,11 @@ describe('agent/response', () => {
       };
       const result = shapeResponse(obj, { fields: ['id', 'description'], maxBytes: 50 });
       expect(result.truncated).toBe(true);
-      expect(typeof result.data).toBe('string');
-      expect((result.data as string)).toContain('[TRUNCATED');
+      expect(typeof result.data).toBe('object');
+      expect(result.data.id).toBe('123');
+      expect(result.data.secret).toBeUndefined();
+      expect(result.data.description).toContain('[clipped]');
+      expect(result.hint).toContain('fields');
     });
 
     it('passes through if no shaping options provided', () => {
@@ -133,6 +147,29 @@ describe('agent/response', () => {
       const result = shapeResponse(obj);
       expect(result.data).toEqual(obj);
       expect(result.truncated).toBe(false);
+    });
+
+    it('handles ArrayBuffer data truncation', () => {
+      const ab = new ArrayBuffer(50);
+      const res = truncateResponse(ab, 20);
+      expect(res.truncated).toBe(true);
+      expect(res.data.byteLength).toBe(20);
+      expect(res.originalBytes).toBe(50);
+
+      const within = truncateResponse(ab, 100);
+      expect(within.truncated).toBe(false);
+    });
+
+    it('parses JSON string and truncates structurally', () => {
+      const jsonStr = JSON.stringify({ items: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10] });
+      const res = truncateResponse(jsonStr, 20);
+      expect(res.truncated).toBe(true);
+      expect(res.originalBytes).toBeGreaterThan(20);
+    });
+
+    it('handles null and undefined data cleanly', () => {
+      expect(truncateResponse(null, 50)).toEqual({ data: null, truncated: false, originalBytes: 0 });
+      expect(truncateResponse(undefined, 50)).toEqual({ data: undefined, truncated: false, originalBytes: 0 });
     });
   });
 });

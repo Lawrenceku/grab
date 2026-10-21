@@ -1,0 +1,14 @@
+{
+  "name": "grab-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) server for grab agent HTTP client",
+  "type": "module",
+  "main": "index.js",
+  "bin": {
+    "grab-mcp": "./index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.6.1",
+    "grab-api": "file:.."
+  }
+}

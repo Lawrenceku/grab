@@ -1,4 +1,4 @@
-import { resolveAuth, redactHeaders, redactError } from '../src/agent/secrets';
+import { resolveAuth, redactHeaders, redactError, scrubSecrets, resolveStaticHeaders, registerSecret, clearRegisteredSecrets } from '../../src/agent/secrets';
 
 describe('agent/secrets', () => {
   describe('resolveAuth', () => {

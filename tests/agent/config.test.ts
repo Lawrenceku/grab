@@ -1,7 +1,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { loadConfig, validateConfig, resolveConfigPath } from '../src/agent/config';
+import { loadConfig, validateConfig, resolveConfigPath } from '../../src/agent/config';
 
 describe('agent/config', () => {
   let tmpDir: string;
@@ -181,6 +181,50 @@ describe('agent/config', () => {
       expect(() => validateConfig({
         instances: { test: { baseURL: 'https://x.com', allow: { hosts: [true] } } },
       })).toThrow('"allow.hosts" must be a string');
+    });
+
+    it('validates allow.methods entries are strings', () => {
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', allow: { methods: [123] } } },
+      })).toThrow('each entry in "allow.methods" must be a string');
+    });
+
+    it('validates instance limits are positive numbers', () => {
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', maxResponseBytes: -10 } },
+      })).toThrow('"maxResponseBytes" must be a positive number');
+
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', rateLimitPerMin: 0 } },
+      })).toThrow('"rateLimitPerMin" must be a positive number');
+    });
+
+    it('validates headers object and entry formats', () => {
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', headers: 'invalid' as any } },
+      })).toThrow('"headers" must be an object');
+
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', headers: { bad: { env: '' } } } },
+      })).toThrow('must specify "env" property');
+
+      expect(() => validateConfig({
+        instances: { test: { baseURL: 'https://x.com', headers: { bad: 123 as any } } },
+      })).toThrow('must be a string or { env: string }');
+    });
+
+    it('validates auditLogPath is a string', () => {
+      expect(() => validateConfig({
+        instances: {},
+        auditLogPath: 123 as any,
+      })).toThrow('"auditLogPath" must be a string');
+    });
+
+    it('validates limits must be an object if defined', () => {
+      expect(() => validateConfig({
+        instances: {},
+        limits: 'bad' as any,
+      })).toThrow('"limits" must be an object');
     });
   });
 });

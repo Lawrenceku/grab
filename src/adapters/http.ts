@@ -85,9 +85,15 @@ function executeHttpRequest<T = any>(
       const statusCode = res.statusCode || 0;
 
       // Redirect handling (301, 302, 303, 307, 308)
-      if ([301, 302, 303, 307, 308].includes(statusCode) && res.headers.location) {
+      if (
+        config.redirect !== 'manual' &&
+        config.maxRedirects !== 0 &&
+        [301, 302, 303, 307, 308].includes(statusCode) &&
+        res.headers.location
+      ) {
         res.resume(); // drain response stream
-        if (redirectCount >= 5) {
+        const maxRedirs = config.maxRedirects !== undefined ? config.maxRedirects : 5;
+        if (redirectCount >= maxRedirs) {
           return fail(
             createError('Too many redirects', 'ERR_TOO_MANY_REDIRECTS', config, req)
           );

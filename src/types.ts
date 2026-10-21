@@ -47,6 +47,8 @@ export interface RequestConfig {
   transformResponse?: ((data: any) => any)[];
   adapter?: Adapter | AdapterName | (Adapter | AdapterName)[];
   fetch?: any;
+  redirect?: 'follow' | 'manual' | 'error';
+  maxRedirects?: number;
 }
 
 export interface Response<T = any> {

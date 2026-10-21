@@ -71,6 +71,92 @@ function matchSegments(
   return false;
 }
 
+export interface ResolvedPathInfo {
+  resolvedURL: string;
+  resolvedPath: string;
+  search: string;
+}
+
+/**
+ * Normalize and resolve a path against a baseURL, defending against path traversal,
+ * protocol-relative attacks, user@host tricks, and origin mismatches.
+ */
+export function resolveAndValidatePath(
+  urlOrPath: string,
+  baseURL: string,
+  instanceName: string = 'instance',
+  allowedHosts?: string[]
+): ResolvedPathInfo {
+  if (!urlOrPath && urlOrPath !== '') {
+    throw createError(`Invalid path on ${instanceName}`, 'ERR_FORBIDDEN');
+  }
+
+  // Decode %2e (.), %2f (/), and %5c (\) case-insensitively before resolving
+  let decoded = urlOrPath
+    .replace(/%2e/gi, '.')
+    .replace(/%2f/gi, '/')
+    .replace(/%5c/gi, '/');
+
+  // Block protocol-relative URLs (e.g. //evil.com)
+  if (/^\s*\/\//.test(decoded)) {
+    throw createError(
+      `Protocol-relative URL "${urlOrPath}" is not allowed on ${instanceName}.`,
+      'ERR_FORBIDDEN'
+    );
+  }
+
+  // Block user@host tricks in authority
+  const preQuery = decoded.split('?')[0].split('#')[0];
+  if (/@/.test(preQuery)) {
+    throw createError(
+      `User credentials or authority tricks (@) in URL "${urlOrPath}" are not allowed on ${instanceName}.`,
+      'ERR_FORBIDDEN'
+    );
+  }
+
+  let baseObj: URL;
+  try {
+    baseObj = new URL(baseURL);
+  } catch {
+    throw createError(`Invalid baseURL "${baseURL}" for instance "${instanceName}"`, 'ERR_FORBIDDEN');
+  }
+
+  let resolved: URL;
+  try {
+    resolved = new URL(decoded, baseURL);
+  } catch {
+    throw createError(`Invalid URL "${urlOrPath}" on ${instanceName}`, 'ERR_FORBIDDEN');
+  }
+
+  // Reject anything whose origin differs from base (unless hostname is in allowedHosts)
+  if (resolved.origin.toLowerCase() !== baseObj.origin.toLowerCase()) {
+    const isAllowedHost =
+      allowedHosts &&
+      allowedHosts.some(h => h.toLowerCase() === resolved.hostname.toLowerCase());
+
+    if (!isAllowedHost) {
+      throw createError(
+        `URL "${urlOrPath}" resolves to origin "${resolved.origin}", which differs from base origin "${baseObj.origin}" on ${instanceName}.`,
+        'ERR_FORBIDDEN'
+      );
+    }
+  }
+
+  // Reject userinfo
+  if (resolved.username || resolved.password) {
+    throw createError(
+      `User credentials in URL are not allowed on ${instanceName}.`,
+      'ERR_FORBIDDEN'
+    );
+  }
+
+  return {
+    resolvedURL: resolved.toString(),
+    resolvedPath: resolved.pathname,
+    search: resolved.search,
+  };
+}
+
 /**
  * Check that a request is allowed by the instance's allowlist.
  * Throws a GrabError with code ERR_FORBIDDEN if the request is blocked.
@@ -78,41 +164,65 @@ function matchSegments(
 export function checkAllowlist(
   instanceConfig: InstanceConfig,
   method: string,
-  url: string,
+  urlOrPath: string,
   instanceName: string
 ): void {
-  const allow = instanceConfig.allow;
-  if (!allow) return; // no allowlist = everything permitted
-
   const upperMethod = method.toUpperCase();
 
-  // Check method allowlist
-  if (allow.methods && allow.methods.length > 0) {
-    const allowed = allow.methods.map(m => m.toUpperCase());
-    if (!allowed.includes(upperMethod)) {
+  // Check read-only constraint
+  if (instanceConfig.readOnly) {
+    const readOnlyAllowed = ['GET', 'HEAD', 'OPTIONS'];
+    if (!readOnlyAllowed.includes(upperMethod)) {
       throw createError(
-        `Method ${upperMethod} is not allowed on instance "${instanceName}". Allowed: ${allowed.join(', ')}`,
+        `Method ${upperMethod} not allowed on read-only instance "${instanceName}"; allowed: ${readOnlyAllowed.join(', ')}`,
         'ERR_FORBIDDEN'
       );
     }
   }
 
-  // Check path allowlist
-  if (allow.paths && allow.paths.length > 0) {
-    // Extract path from full URL or relative path
-    let pathToCheck: string;
+  const allow = instanceConfig.allow;
+
+  // Check method allowlist
+  if (allow?.methods && allow.methods.length > 0) {
+    const allowed = allow.methods.map(m => m.toUpperCase());
+    if (!allowed.includes(upperMethod)) {
+      throw createError(
+        `Method ${upperMethod} is not allowed on instance "${instanceName}"; allowed: ${allowed.join(', ')}`,
+        'ERR_FORBIDDEN'
+      );
+    }
+  }
+
+  // Normalize path if baseURL is available
+  let pathToCheck: string;
+  if (instanceConfig.baseURL) {
     try {
-      const parsed = new URL(url);
+      const resolved = resolveAndValidatePath(
+        urlOrPath,
+        instanceConfig.baseURL,
+        instanceName,
+        instanceConfig.allow?.hosts
+      );
+      pathToCheck = resolved.resolvedPath;
+    } catch (err: any) {
+      if (err?.code === 'ERR_FORBIDDEN') throw err;
+      pathToCheck = urlOrPath.split('?')[0].split('#')[0];
+    }
+  } else {
+    try {
+      const parsed = new URL(urlOrPath);
       pathToCheck = parsed.pathname;
     } catch {
-      // It's a relative path (e.g. '/customers/123')
-      pathToCheck = url.split('?')[0].split('#')[0];
+      pathToCheck = urlOrPath.split('?')[0].split('#')[0];
     }
+  }
 
+  // Check path allowlist
+  if (allow?.paths && allow.paths.length > 0) {
     const matched = allow.paths.some(pattern => matchPath(pattern, pathToCheck));
     if (!matched) {
       throw createError(
-        `Path "${pathToCheck}" is not allowed on instance "${instanceName}". Allowed patterns: ${allow.paths.join(', ')}`,
+        `Path "${pathToCheck}" is not allowed on instance "${instanceName}"; allowed paths: ${allow.paths.join(', ')}`,
         'ERR_FORBIDDEN'
       );
     }
@@ -161,4 +271,27 @@ export function checkRedirectHost(
       : 'No cross-host redirects are permitted (add allow.hosts to config)'),
     'ERR_FORBIDDEN'
   );
+}
+
+/**
+ * Check a redirect hop: verifies allowed host and re-runs the full allowlist check
+ * (method + path) on the target hop. Returns true if this is a cross-host hop.
+ */
+export function checkRedirectHop(
+  instanceConfig: InstanceConfig,
+  nextMethod: string,
+  originalUrl: string,
+  redirectUrl: string,
+  instanceName: string
+): { isCrossHost: boolean } {
+  // 1. Check host
+  checkRedirectHost(instanceConfig, originalUrl, redirectUrl, instanceName);
+
+  // 2. Full allowlist check on target
+  checkAllowlist(instanceConfig, nextMethod, redirectUrl, instanceName);
+
+  const origHost = new URL(originalUrl).hostname.toLowerCase();
+  const redirHost = new URL(redirectUrl).hostname.toLowerCase();
+
+  return { isCrossHost: origHost !== redirHost };
 }

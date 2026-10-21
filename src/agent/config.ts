@@ -20,10 +20,52 @@ export function resolveConfigPath(explicit?: string): string {
 }
 
 /**
+ * Validate that required environment variables exist for all configured instances.
+ * Outputs clear messages to stderr.
+ */
+export function validateStartupEnv(
+  config: GrabAgentConfig,
+  throwOnError: boolean = false
+): string[] {
+  const missing: string[] = [];
+
+  for (const [name, inst] of Object.entries(config.instances)) {
+    // Check auth env var
+    if (inst.auth?.env) {
+      if (!process.env[inst.auth.env]) {
+        const msg = `[grab config] Missing environment variable "${inst.auth.env}" for instance "${name}". Set it in your environment before making requests.\n`;
+        process.stderr.write(msg);
+        missing.push(msg);
+      }
+    }
+
+    // Check header { env } env vars
+    if (inst.headers) {
+      for (const [headerKey, headerVal] of Object.entries(inst.headers)) {
+        if (typeof headerVal === 'object' && headerVal !== null && 'env' in headerVal) {
+          const envName = headerVal.env;
+          if (!process.env[envName]) {
+            const msg = `[grab config] Missing environment variable "${envName}" for header "${headerKey}" in instance "${name}".\n`;
+            process.stderr.write(msg);
+            missing.push(msg);
+          }
+        }
+      }
+    }
+  }
+
+  if (throwOnError && missing.length > 0) {
+    throw new Error(`grab startup validation failed:\n${missing.join('')}`);
+  }
+
+  return missing;
+}
+
+/**
  * Load and validate the agent config from disk.
  * Throws with a descriptive message if the file is missing or malformed.
  */
-export function loadConfig(configPath?: string): GrabAgentConfig {
+export function loadConfig(configPath?: string, options: { validateEnv?: boolean } = {}): GrabAgentConfig {
   const filePath = resolveConfigPath(configPath);
 
   if (!fs.existsSync(filePath)) {
@@ -47,7 +89,16 @@ export function loadConfig(configPath?: string): GrabAgentConfig {
     throw new Error(`Invalid JSON in grab config at ${filePath}: ${err.message}`);
   }
 
-  return validateConfig(parsed, filePath);
+  const validated = validateConfig(parsed, filePath);
+
+  if (options.validateEnv) {
+    validateStartupEnv(validated, true);
+  } else {
+    // Non-throwing check to print helpful stderr warnings at startup
+    validateStartupEnv(validated, false);
+  }
+
+  return validated;
 }
 
 /**
@@ -97,6 +148,13 @@ export function validateConfig(obj: any, source: string = '<inline>'): GrabAgent
     }
   }
 
+  if (obj.auditLogPath !== undefined) {
+    if (typeof obj.auditLogPath !== 'string') {
+      throw new Error(`grab config (${source}): "auditLogPath" must be a string`);
+    }
+    config.auditLogPath = obj.auditLogPath;
+  }
+
   return config;
 }
 
@@ -111,9 +169,37 @@ function validateInstance(obj: any, name: string, source: string): InstanceConfi
     throw new Error(`${ctx}: "baseURL" is required and must be a non-empty string`);
   }
 
+  // Validate baseURL scheme: must be https:// unless localhost
+  let parsedUrl: URL;
+  try {
+    parsedUrl = new URL(obj.baseURL);
+  } catch {
+    throw new Error(`${ctx}: "baseURL" must be a valid URL`);
+  }
+
+  const isLocalhost =
+    parsedUrl.hostname === 'localhost' ||
+    parsedUrl.hostname === '127.0.0.1' ||
+    parsedUrl.hostname === '::1' ||
+    parsedUrl.hostname === '[::1]';
+
+  if (parsedUrl.protocol !== 'https:' && !isLocalhost) {
+    process.stderr.write(
+      `[grab config] Insecure baseURL scheme "${parsedUrl.protocol}" for instance "${name}". Only https:// is allowed unless localhost.\n`
+    );
+    throw new Error(`${ctx}: "baseURL" must use https:// scheme unless localhost (got "${obj.baseURL}")`);
+  }
+
   const inst: InstanceConfig = {
     baseURL: obj.baseURL,
   };
+
+  if (obj.readOnly !== undefined) {
+    if (typeof obj.readOnly !== 'boolean') {
+      throw new Error(`${ctx}: "readOnly" must be a boolean`);
+    }
+    inst.readOnly = obj.readOnly;
+  }
 
   if (obj.auth !== undefined) {
     inst.auth = validateAuth(obj.auth, ctx);
@@ -124,8 +210,17 @@ function validateInstance(obj: any, name: string, source: string): InstanceConfi
   }
 
   if (obj.headers !== undefined) {
-    if (typeof obj.headers !== 'object' || obj.headers === null) {
+    if (typeof obj.headers !== 'object' || obj.headers === null || Array.isArray(obj.headers)) {
       throw new Error(`${ctx}: "headers" must be an object`);
+    }
+    for (const [hKey, hVal] of Object.entries(obj.headers)) {
+      if (typeof hVal === 'object' && hVal !== null) {
+        if (typeof (hVal as any).env !== 'string' || !(hVal as any).env) {
+          throw new Error(`${ctx}: header "${hKey}" object must specify "env" property as non-empty string`);
+        }
+      } else if (typeof hVal !== 'string') {
+        throw new Error(`${ctx}: header "${hKey}" must be a string or { env: string } object`);
+      }
     }
     inst.headers = obj.headers;
   }

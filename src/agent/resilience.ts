@@ -13,12 +13,14 @@ function sleep(ms: number): Promise<void> {
  * Determine if an error or status code is retryable.
  * Retries on: 429 (rate limited), 5xx (server error), network errors.
  */
-export function isRetryable(error: any): boolean {
+export function isRetryable(errorOrResponse: any): boolean {
+  if (!errorOrResponse) return false;
+
   // Network errors
-  if (error?.code === 'ERR_NETWORK' || error?.code === 'ECONNRESET') return true;
+  if (errorOrResponse.code === 'ERR_NETWORK' || errorOrResponse.code === 'ECONNRESET') return true;
 
   // HTTP 429 or 5xx
-  const status = error?.status || error?.response?.status;
+  const status = errorOrResponse.status || errorOrResponse.response?.status;
   if (status === 429) return true;
   if (status && status >= 500 && status < 600) return true;
 
@@ -37,11 +39,21 @@ export interface RetryOptions {
   maxDelayMs?: number;
   /** Respect Retry-After header from 429 responses. Default: true. */
   respectRetryAfter?: boolean;
+  /** HTTP method being requested (used to enforce idempotency). Default: 'GET'. */
+  method?: string;
+  /** Opt-in flag to allow retrying non-idempotent POST requests. Default: false. */
+  retryPost?: boolean;
+  /** Custom list of HTTP methods that may be retried. Overrides defaults. */
+  retryMethods?: string[];
 }
+
+/** Default methods considered safe / idempotent to retry automatically. */
+const DEFAULT_IDEMPOTENT_METHODS = ['GET', 'HEAD', 'PUT', 'DELETE', 'OPTIONS'];
 
 /**
  * Execute fn with automatic retries on retryable failures.
- * Uses exponential backoff with jitter.
+ * Safe by default: only retries idempotent methods (GET, HEAD, PUT, DELETE) unless POST is opted in.
+ * Honors Retry-After headers from 429 responses.
  */
 export async function withRetry<T>(
   fn: () => Promise<T>,
@@ -53,15 +65,54 @@ export async function withRetry<T>(
   const maxDelay = options.maxDelayMs ?? 30000;
   const respectRetryAfter = options.respectRetryAfter ?? true;
 
+  const method = (options.method || 'GET').toUpperCase();
+  const allowedMethods = options.retryMethods
+    ? options.retryMethods.map(m => m.toUpperCase())
+    : options.retryPost
+      ? [...DEFAULT_IDEMPOTENT_METHODS, 'POST']
+      : DEFAULT_IDEMPOTENT_METHODS;
+
+  const methodIsRetryable = allowedMethods.includes(method);
+
   let lastError: any;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      return await fn();
+      const result: any = await fn();
+
+      // If the function resolves with a 429 or 5xx response object (e.g. validateStatus: () => true)
+      if (result && typeof result === 'object' && 'status' in result) {
+        const status = result.status;
+        const isRetriableStatus = status === 429 || (status >= 500 && status < 600);
+        if (isRetriableStatus) {
+          if (attempt >= maxRetries || !methodIsRetryable) {
+            return result;
+          }
+
+          let delay = Math.min(initialDelay * Math.pow(multiplier, attempt), maxDelay);
+
+          if (respectRetryAfter && result.headers) {
+            const retryAfter = result.headers['retry-after'] || result.headers['Retry-After'];
+            if (retryAfter) {
+              const retryAfterMs = parseRetryAfter(retryAfter);
+              if (retryAfterMs > 0) {
+                delay = Math.min(retryAfterMs, maxDelay);
+              }
+            }
+          }
+
+          const jitter = delay * 0.25 * (Math.random() * 2 - 1);
+          delay = Math.max(0, delay + jitter);
+          await sleep(delay);
+          continue;
+        }
+      }
+
+      return result;
     } catch (err: any) {
       lastError = err;
 
-      if (attempt >= maxRetries || !isRetryable(err)) {
+      if (attempt >= maxRetries || !isRetryable(err) || !methodIsRetryable) {
         throw err;
       }
 
@@ -69,12 +120,15 @@ export async function withRetry<T>(
       let delay = Math.min(initialDelay * Math.pow(multiplier, attempt), maxDelay);
 
       // Respect Retry-After header if present
-      if (respectRetryAfter && err?.response?.headers) {
-        const retryAfter = err.response.headers['retry-after'];
-        if (retryAfter) {
-          const retryAfterMs = parseRetryAfter(retryAfter);
-          if (retryAfterMs > 0) {
-            delay = Math.min(retryAfterMs, maxDelay);
+      if (respectRetryAfter) {
+        const headers = err?.response?.headers || err?.headers;
+        if (headers) {
+          const retryAfter = headers['retry-after'] || headers['Retry-After'];
+          if (retryAfter) {
+            const retryAfterMs = parseRetryAfter(retryAfter);
+            if (retryAfterMs > 0) {
+              delay = Math.min(retryAfterMs, maxDelay);
+            }
           }
         }
       }
@@ -94,9 +148,10 @@ export async function withRetry<T>(
  * Parse a Retry-After header value.
  * Supports seconds (integer) or HTTP-date format.
  */
-function parseRetryAfter(value: string): number {
+export function parseRetryAfter(value: string): number {
+  if (!value) return 0;
   const seconds = parseInt(value, 10);
-  if (!isNaN(seconds)) return seconds * 1000;
+  if (!isNaN(seconds)) return Math.max(0, seconds * 1000);
 
   const date = Date.parse(value);
   if (!isNaN(date)) return Math.max(0, date - Date.now());
@@ -161,7 +216,7 @@ export interface DryRunResult {
 
 /**
  * Build a dry-run result instead of sending a real request.
- * Useful for agents to preview what would be sent.
+ * Returns what would actually be sent after allowlist and resolution pass.
  */
 export function buildDryRunResult(
   method: string,

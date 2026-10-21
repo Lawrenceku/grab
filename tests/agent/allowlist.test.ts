@@ -1,4 +1,4 @@
-import { matchPath, checkAllowlist, checkRedirectHost } from '../src/agent/allowlist';
+import { matchPath, checkAllowlist, checkRedirectHost, resolveAndValidatePath, checkRedirectHop } from '../../src/agent/allowlist';
 
 describe('agent/allowlist', () => {
   describe('matchPath', () => {

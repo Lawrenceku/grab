@@ -326,4 +326,71 @@ describe('adapters/fetch', () => {
     });
     expect(abStreamRes.data).toBeInstanceOf(ArrayBuffer);
   });
+
+  it('parses headers when res.headers has forEach instead of entries', async () => {
+    const fakeHeaders = {
+      forEach: (cb: (v: string, k: string) => void) => {
+        cb('custom-header-val', 'X-Custom-H');
+      },
+    };
+
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: fakeHeaders,
+      text: () => Promise.resolve('ok'),
+    } as any);
+
+    const res = await fetchAdapter({
+      url: 'https://example.com',
+      headers: {},
+      method: 'GET',
+    });
+
+    expect(res.headers['x-custom-h']).toBe('custom-header-val');
+  });
+
+  it('wires external signal abort to internal controller', async () => {
+    const externalController = new AbortController();
+    const mockFetch = jest.fn().mockImplementation((url, opts) => {
+      return new Promise((resolve, reject) => {
+        opts.signal.addEventListener('abort', () => {
+          const err = new Error('The operation was aborted');
+          err.name = 'AbortError';
+          reject(err);
+        });
+        // Abort the external controller, which should trigger onExternalAbort
+        externalController.abort();
+      });
+    });
+
+    const promise = fetchAdapter({
+      url: 'https://example.com/abort',
+      headers: {},
+      method: 'GET',
+      timeout: 5000,
+      signal: externalController.signal,
+      fetch: mockFetch,
+    });
+
+    await expect(promise).rejects.toThrow();
+  });
+
+  it('cleans up abort listener on successful request with timeout and signal', async () => {
+    const signal = new AbortController().signal;
+    const mockFetch = jest.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      text: () => Promise.resolve('ok'),
+    });
+    const res = await fetchAdapter({
+      url: 'https://example.com/clean',
+      headers: {},
+      method: 'GET',
+      timeout: 5000,
+      signal,
+      fetch: mockFetch,
+    });
+    expect(res.status).toBe(200);
+  });
 });
