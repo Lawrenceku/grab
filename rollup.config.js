@@ -75,6 +75,9 @@ export default [
       'events',
       'net',
       'tls',
+      'fs',
+      'path',
+      'os',
     ],
   },
 ];
