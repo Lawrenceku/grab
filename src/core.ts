@@ -7,15 +7,31 @@ import {
 } from './types';
 import { createError, resolveAdapter } from './adapters/registry';
 
-export function buildURL(url?: string, baseURL?: string, params?: Record<string, any>): string {
-  let finalUrl = url || '';
-  if (baseURL && url && !/^https?:\/\//i.test(url)) {
-    finalUrl = baseURL.replace(/\/+$/, '') + '/' + url.replace(/^\/+/, '');
-  } else if (baseURL && !url) {
-    finalUrl = baseURL;
+export function buildURL(
+  urlOrConfig?: string | RequestConfig,
+  baseURL?: string,
+  params?: Record<string, any>
+): string {
+  let url: string | undefined;
+  let finalBaseURL = baseURL;
+  let finalParams = params;
+
+  if (typeof urlOrConfig === 'object' && urlOrConfig !== null) {
+    url = urlOrConfig.url;
+    finalBaseURL = urlOrConfig.baseURL;
+    finalParams = urlOrConfig.params;
+  } else {
+    url = urlOrConfig;
   }
 
-  if (params) {
+  let finalUrl = url || '';
+  if (finalBaseURL && url && !/^https?:\/\//i.test(url)) {
+    finalUrl = finalBaseURL.replace(/\/+$/, '') + '/' + url.replace(/^\/+/, '');
+  } else if (finalBaseURL && !url) {
+    finalUrl = finalBaseURL;
+  }
+
+  if (finalParams) {
     const searchParams = new URLSearchParams();
     const buildParams = (obj: any, prefix?: string) => {
       if (obj === null || obj === undefined) return;
@@ -33,7 +49,7 @@ export function buildURL(url?: string, baseURL?: string, params?: Record<string,
         searchParams.append(prefix!, String(obj));
       }
     };
-    buildParams(params);
+    buildParams(finalParams);
     const query = searchParams.toString();
     if (query) {
       finalUrl += `${finalUrl.includes('?') ? '&' : '?'}${query}`;
@@ -86,14 +102,14 @@ export class InterceptorManagerImpl<V> implements InterceptorManager<V> {
   }
 
   eject(id: number): void {
-    if (this.handlers[id]) {
+    if (this.handlers[id] !== undefined) {
       this.handlers[id] = null;
     }
   }
 
   forEach(fn: (interceptor: Interceptor<V>) => void): void {
     this.handlers.forEach(handler => {
-      if (handler !== null && (handler.fulfilled || handler.rejected)) {
+      if (handler !== null) {
         fn(handler);
       }
     });
@@ -108,36 +124,29 @@ export function isCancel(value: any): boolean {
   return Boolean(value && (value.code === 'ERR_CANCELED' || value.code === 'ABORTED'));
 }
 
-export async function dispatchRequest<T = any>(config: RequestConfig): Promise<Response<T>> {
-  const { url, baseURL, params, data, body, headers = {}, transformRequest, transformResponse } = config;
+export async function dispatch<T = any>(config: RequestConfig): Promise<Response<T>> {
+  const finalUrl = buildURL(config);
+  const headers: Record<string, string> = { ...config.headers };
 
-  const finalUrl = buildURL(url, baseURL, params);
-  const normalizedHeaders: Record<string, string> = { ...headers };
-
-  const rawData = data ?? body;
-  let transformedData = rawData;
-  const reqTransforms = transformRequest || [defaultTransformRequest];
+  let data = config.data ?? config.body;
+  const reqTransforms = config.transformRequest || [defaultTransformRequest];
   for (const transform of reqTransforms) {
-    transformedData = transform(transformedData, normalizedHeaders);
+    data = transform(data, headers);
   }
 
   const adapter = resolveAdapter(config);
   const adapterRequest: AdapterRequest = {
     ...config,
     url: finalUrl,
-    headers: normalizedHeaders,
-    data: transformedData,
+    headers,
+    data,
   };
 
-  const adapterResponse = await adapter(adapterRequest);
+  const raw = await adapter(adapterRequest);
 
   const response: Response<T> = {
-    data: adapterResponse.data,
-    status: adapterResponse.status,
-    statusText: adapterResponse.statusText,
-    headers: adapterResponse.headers,
+    ...raw,
     config,
-    request: adapterResponse.request,
   };
 
   const validateStatus =
@@ -147,13 +156,13 @@ export async function dispatchRequest<T = any>(config: RequestConfig): Promise<R
       `Request failed with status: ${response.status}`,
       'ERR_BAD_RESPONSE',
       config,
-      adapterResponse.request,
+      raw.request,
       response
     );
   }
 
   let responseData = response.data;
-  const resTransforms = transformResponse || [defaultTransformResponse];
+  const resTransforms = config.transformResponse || [defaultTransformResponse];
   for (const transform of resTransforms) {
     responseData = transform(responseData);
   }
@@ -161,6 +170,8 @@ export async function dispatchRequest<T = any>(config: RequestConfig): Promise<R
 
   return response;
 }
+
+export const dispatchRequest = dispatch;
 
 export class GrabInstance {
   public defaults: RequestConfig;
@@ -191,20 +202,25 @@ export class GrabInstance {
   async request<T = any>(config: RequestConfig): Promise<Response<T>> {
     const mergedConfig = this.mergeConfig(config);
 
+    const chain: [((val: any) => any) | undefined, ((err: any) => any) | undefined][] = [
+      [dispatch, undefined],
+    ];
+
+    // Request interceptors run in LIFO order (unshift pairs)
+    this.requestInterceptors.forEach(interceptor => {
+      chain.unshift([interceptor.fulfilled, interceptor.rejected]);
+    });
+
+    // Response interceptors run in FIFO order (push pairs)
+    this.responseInterceptors.forEach(interceptor => {
+      chain.push([interceptor.fulfilled, interceptor.rejected]);
+    });
+
     let promise: Promise<any> = Promise.resolve(mergedConfig);
 
-    for (const handler of this.requestInterceptors.getHandlers()) {
-      if (handler.fulfilled || handler.rejected) {
-        promise = promise.then(handler.fulfilled, handler.rejected);
-      }
-    }
-
-    promise = promise.then(cfg => dispatchRequest<T>(cfg));
-
-    for (const handler of this.responseInterceptors.getHandlers()) {
-      if (handler.fulfilled || handler.rejected) {
-        promise = promise.then(handler.fulfilled, handler.rejected);
-      }
+    while (chain.length > 0) {
+      const [fulfilled, rejected] = chain.shift()!;
+      promise = promise.then(fulfilled, rejected);
     }
 
     return promise;

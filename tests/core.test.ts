@@ -59,6 +59,15 @@ describe('core', () => {
       const url = buildURL('/search?type=user', undefined, { page: 2 });
       expect(url).toBe('/search?type=user&page=2');
     });
+
+    it('accepts config object directly as first argument', () => {
+      const url = buildURL({
+        url: 'posts/1',
+        baseURL: 'https://example.com/api',
+        params: { active: true },
+      });
+      expect(url).toBe('https://example.com/api/posts/1?active=true');
+    });
   });
 
   describe('defaultTransformRequest', () => {
@@ -272,6 +281,54 @@ describe('core', () => {
       });
 
       await expect(api.get('/test')).rejects.toThrow('Blocked by request interceptor');
+    });
+
+    it('executes request interceptors in LIFO order and response interceptors in FIFO order', async () => {
+      const api = new GrabInstance({ adapter: mockAdapter });
+      const order: string[] = [];
+
+      api.interceptors.request.use(config => {
+        order.push('request-1');
+        return config;
+      });
+      api.interceptors.request.use(config => {
+        order.push('request-2');
+        return config;
+      });
+
+      api.interceptors.response.use(response => {
+        order.push('response-1');
+        return response;
+      });
+      api.interceptors.response.use(response => {
+        order.push('response-2');
+        return response;
+      });
+
+      await api.get('/test');
+      expect(order).toEqual(['request-2', 'request-1', 'response-1', 'response-2']);
+    });
+
+    it('honors rejected handler on request interceptors for error recovery', async () => {
+      const api = new GrabInstance({ adapter: mockAdapter });
+
+      // Registered first -> runs last in LIFO request chain, catching upstream error
+      api.interceptors.request.use(
+        config => config,
+        () => {
+          // Recover by returning valid config
+          return { url: '/recovered', adapter: mockAdapter };
+        }
+      );
+      // Registered second -> runs first in LIFO request chain, throws error
+      api.interceptors.request.use(
+        () => {
+          throw new Error('Initial error');
+        }
+      );
+
+      const res = await api.get('/initial');
+      expect(res.data.url).toBe('/recovered');
     });
 
     it('supports custom transforms and body alias', async () => {

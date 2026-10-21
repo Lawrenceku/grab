@@ -65,27 +65,23 @@ describe('adapters/registry', () => {
   });
 
   describe('isAdapterAvailable', () => {
-    const hasFetch =
-      (typeof window !== 'undefined' && typeof window.fetch === 'function') ||
-      (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function');
-    const hasXHR = typeof XMLHttpRequest !== 'undefined';
-
     it('returns false for unregistered adapter', () => {
       expect(isAdapterAvailable('fetch')).toBe(false);
     });
 
-    it('checks fetch availability based on runtime environment', () => {
+    it('returns true when adapter is registered', () => {
       registerAdapter('fetch', dummyAdapter);
-      // In jsdom, fetch is not provided; result depends on env
-      expect(isAdapterAvailable('fetch')).toBe(hasFetch);
+      expect(isAdapterAvailable('fetch')).toBe(true);
     });
 
-    it('checks xhr availability', () => {
+    it('checks xhr availability based on registration', () => {
+      expect(isAdapterAvailable('xhr')).toBe(false);
       registerAdapter('xhr', dummyAdapter);
-      expect(isAdapterAvailable('xhr')).toBe(hasXHR);
+      expect(isAdapterAvailable('xhr')).toBe(true);
     });
 
-    it('checks http availability (Node process)', () => {
+    it('checks http availability based on registration', () => {
+      expect(isAdapterAvailable('http')).toBe(false);
       registerAdapter('http', dummyAdapter);
       expect(isAdapterAvailable('http')).toBe(true);
     });
@@ -151,24 +147,16 @@ describe('adapters/registry', () => {
       expect(resolved).toBe(xhrMock);
     });
 
-    it('default resolution picks best available adapter for environment', () => {
+    it('default resolution picks first registered adapter from [http, fetch, xhr]', () => {
       const xhrMock: Adapter = async () => ({ data: 'xhr', status: 200, statusText: 'OK', headers: {} });
       const fetchMock: Adapter = async () => ({ data: 'fetch', status: 200, statusText: 'OK', headers: {} });
       registerAdapter('xhr', xhrMock);
       registerAdapter('fetch', fetchMock);
 
-      // Default resolution checks runtime availability:
-      // - In jsdom: fetch unavailable, XHR available → picks XHR
-      // - In real browser/Node 18+: fetch available → picks fetch
+      // Default resolution checks [http, fetch, xhr] in order of registration:
+      // http is not registered, fetch is registered -> picks fetch
       const resolved = resolveAdapter({});
-      const hasFetchRuntime =
-        (typeof window !== 'undefined' && typeof window.fetch === 'function') ||
-        (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function');
-      if (hasFetchRuntime) {
-        expect(resolved).toBe(fetchMock);
-      } else {
-        expect(resolved).toBe(xhrMock);
-      }
+      expect(resolved).toBe(fetchMock);
     });
 
     it('resolves adapter when specified inside config object', () => {

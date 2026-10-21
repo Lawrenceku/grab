@@ -1,17 +1,21 @@
-import { Adapter, AdapterName, GrabError, RequestConfig, Response } from '../types';
+import { Adapter, GrabError, RequestConfig, Response } from '../types';
 
-const registry = new Map<AdapterName, Adapter>();
+const registry = new Map<string, Adapter>();
 
-export function registerAdapter(name: AdapterName, adapter: Adapter): void {
+export function registerAdapter(name: string, adapter: Adapter): void {
   registry.set(name, adapter);
 }
 
-export function getRegisteredAdapter(name: AdapterName): Adapter | undefined {
+export function getRegisteredAdapter(name: string): Adapter | undefined {
   return registry.get(name);
 }
 
 export function clearRegistry(): void {
   registry.clear();
+}
+
+export function isAdapterAvailable(name: string): boolean {
+  return registry.has(name);
 }
 
 export function createError(
@@ -35,107 +39,56 @@ export function createError(
   return error;
 }
 
-export function isAdapterAvailable(name: AdapterName): boolean {
-  if (!registry.has(name)) return false;
-  if (name === 'xhr') {
-    return typeof XMLHttpRequest !== 'undefined';
-  }
-  if (name === 'fetch') {
-    return (
-      (typeof window !== 'undefined' && typeof window.fetch === 'function') ||
-      (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function') ||
-      (typeof fetch === 'function')
-    );
-  }
-  if (name === 'http') {
-    return (
-      typeof process !== 'undefined' &&
-      process.versions != null &&
-      process.versions.node != null
-    );
-  }
-  return true;
-}
-
 export function resolveAdapter(
-  configOrAdapter?: RequestConfig | Adapter | AdapterName | (Adapter | AdapterName)[],
-  maybeConfig?: RequestConfig
+  input: Adapter | string | (Adapter | string)[] | RequestConfig = ['http', 'fetch', 'xhr'],
+  config?: RequestConfig
 ): Adapter {
-  if (typeof configOrAdapter === 'function') {
-    return configOrAdapter;
+  if (typeof input === 'function') {
+    return input;
   }
 
-  let adapterOption: Adapter | AdapterName | (Adapter | AdapterName)[] | undefined;
-  let config: RequestConfig | undefined;
+  let effectiveConfig = config;
+  let targets: (Adapter | string)[];
 
-  if (typeof configOrAdapter === 'string' || Array.isArray(configOrAdapter)) {
-    adapterOption = configOrAdapter;
-    config = maybeConfig;
-  } else if (configOrAdapter && typeof configOrAdapter === 'object') {
-    config = configOrAdapter;
-    adapterOption = config.adapter;
-  }
-
-  if (typeof adapterOption === 'function') {
-    return adapterOption;
-  }
-
-  if (typeof adapterOption === 'string') {
-    const adapter = registry.get(adapterOption);
-    if (!adapter) {
-      throw createError(`Adapter "${adapterOption}" is not registered`, 'ERR_NO_ADAPTER', config);
+  if (input && typeof input === 'object' && !Array.isArray(input)) {
+    effectiveConfig = input as RequestConfig;
+    if (typeof effectiveConfig.adapter === 'function') {
+      return effectiveConfig.adapter;
     }
-    return adapter;
-  }
-
-  if (Array.isArray(adapterOption)) {
-    for (const item of adapterOption) {
-      if (typeof item === 'function') {
-        return item;
+    if (effectiveConfig.adapter) {
+      targets = Array.isArray(effectiveConfig.adapter)
+        ? effectiveConfig.adapter
+        : [effectiveConfig.adapter];
+    } else {
+      if (effectiveConfig.onUploadProgress && registry.has('xhr')) {
+        return registry.get('xhr')!;
       }
-      if (typeof item === 'string' && isAdapterAvailable(item)) {
-        return registry.get(item)!;
-      }
+      targets = ['http', 'fetch', 'xhr'];
     }
-    throw createError('None of the requested adapters are available', 'ERR_NO_ADAPTER', config);
+  } else {
+    if (
+      effectiveConfig?.onUploadProgress &&
+      (input === undefined ||
+        (Array.isArray(input) &&
+          input.length === 3 &&
+          input[0] === 'http' &&
+          input[1] === 'fetch' &&
+          input[2] === 'xhr')) &&
+      registry.has('xhr')
+    ) {
+      return registry.get('xhr')!;
+    }
+    targets = Array.isArray(input) ? input : [input as Adapter | string];
   }
 
-  // Default resolution
-  // Fallback to XHR if upload progress tracking is requested and XHR is available
-  if (config?.onUploadProgress && isAdapterAvailable('xhr')) {
-    return registry.get('xhr')!;
+  for (const item of targets) {
+    if (typeof item === 'function') {
+      return item;
+    }
+    if (typeof item === 'string' && registry.has(item)) {
+      return registry.get(item)!;
+    }
   }
 
-  // In Node environment, use http adapter if registered and available
-  const isNode =
-    typeof window === 'undefined' &&
-    typeof process !== 'undefined' &&
-    process.versions != null &&
-    process.versions.node != null;
-
-  if (isNode && isAdapterAvailable('http')) {
-    return registry.get('http')!;
-  }
-
-  // Primary transport: fetch
-  if (isAdapterAvailable('fetch')) {
-    return registry.get('fetch')!;
-  }
-
-  // Fallback: xhr
-  if (isAdapterAvailable('xhr')) {
-    return registry.get('xhr')!;
-  }
-
-  // Fallback: http if registered
-  if (registry.has('http')) {
-    return registry.get('http')!;
-  }
-
-  // Fallback: fetch if registered
-  if (registry.has('fetch')) {
-    return registry.get('fetch')!;
-  }
-
-  throw createError('No adapter available for this environment', 'ERR_NO_ADAPTER', config);
+  throw createError('No supported adapter available', 'ERR_NO_ADAPTER', effectiveConfig);
 }
