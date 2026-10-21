@@ -43,7 +43,7 @@ describe('adapters/xhr', () => {
       (globalThis as any).XMLHttpRequest = originalXHR;
     });
 
-    it('performs request and resolves with parsed json by default', async () => {
+    it('performs request and resolves with raw response string for json by default', async () => {
       const config: AdapterRequest = {
         url: 'https://example.com/api',
         method: 'GET',
@@ -52,14 +52,15 @@ describe('adapters/xhr', () => {
 
       const promise = xhrAdapter(config);
       expect(mockXHR.open).toHaveBeenCalledWith('GET', 'https://example.com/api', true);
-      expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('Accept', 'application/json');
+      expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('Accept', 'application/json, text/plain, */*');
       expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('X-Key', '123');
+      expect(mockXHR.responseType).toBe('text');
 
       mockXHR.onload();
       const res = await promise;
 
       expect(res.status).toBe(200);
-      expect(res.data).toEqual({ success: true });
+      expect(res.data).toBe('{"success":true}');
       expect(res.headers['content-type']).toBe('application/json');
     });
 
@@ -111,7 +112,7 @@ describe('adapters/xhr', () => {
       });
     });
 
-    it('handles timeout and rejects with ETIMEDOUT', async () => {
+    it('handles timeout via xhr.ontimeout and rejects with ETIMEDOUT', async () => {
       const config: AdapterRequest = {
         url: 'https://example.com/timeout',
         headers: {},
@@ -119,6 +120,7 @@ describe('adapters/xhr', () => {
       };
 
       const promise = xhrAdapter(config);
+      expect(mockXHR.timeout).toBe(500);
       mockXHR.ontimeout();
 
       await expect(promise).rejects.toMatchObject({
@@ -143,6 +145,21 @@ describe('adapters/xhr', () => {
         message: 'Request aborted',
       });
       expect(mockXHR.abort).toHaveBeenCalled();
+    });
+
+    it('handles onabort event and rejects with ERR_CANCELED', async () => {
+      const config: AdapterRequest = {
+        url: 'https://example.com/abort-event',
+        headers: {},
+      };
+
+      const promise = xhrAdapter(config);
+      mockXHR.onabort();
+
+      await expect(promise).rejects.toMatchObject({
+        code: 'ERR_CANCELED',
+        message: 'Request aborted',
+      });
     });
 
     it('rejects with ERR_CANCELED immediately if signal already aborted', async () => {
@@ -190,24 +207,6 @@ describe('adapters/xhr', () => {
       });
     });
 
-    it('triggers fallback timeout timer when xhr.ontimeout does not fire', async () => {
-      jest.useFakeTimers();
-
-      const promise = xhrAdapter({
-        url: 'https://example.com/slow',
-        headers: {},
-        timeout: 200,
-      });
-
-      jest.advanceTimersByTime(250);
-
-      await expect(promise).rejects.toMatchObject({
-        code: 'ETIMEDOUT',
-      });
-
-      jest.useRealTimers();
-    });
-
     it('respects existing Accept header without overriding', async () => {
       const config: AdapterRequest = {
         url: 'https://example.com/xml',
@@ -217,7 +216,7 @@ describe('adapters/xhr', () => {
       const promise = xhrAdapter(config);
       expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('Accept', 'application/xml');
       expect(mockXHR.setRequestHeader).toHaveBeenCalledWith('X-Custom', 'val');
-      expect(mockXHR.setRequestHeader).not.toHaveBeenCalledWith('Accept', 'application/json');
+      expect(mockXHR.setRequestHeader).not.toHaveBeenCalledWith('Accept', 'application/json, text/plain, */*');
 
       mockXHR.onload();
       await promise;
@@ -261,19 +260,26 @@ describe('adapters/xhr', () => {
       });
       mockXHR.onload();
       const res = await promise;
-      expect(res.data).toEqual({ fromText: true });
+      expect(res.data).toBe('{"fromText":true}');
     });
 
-    it('returns raw text if json parsing fails in xhr', async () => {
-      mockXHR.response = 'not valid json string';
-      const promise = xhrAdapter({
-        url: 'https://example.com/badjson',
+    it('sends data ?? null when calling xhr.send', async () => {
+      const promise1 = xhrAdapter({
+        url: 'https://example.com/post1',
         headers: {},
-        responseType: 'json',
+        data: 'payload',
       });
+      expect(mockXHR.send).toHaveBeenCalledWith('payload');
       mockXHR.onload();
-      const res = await promise;
-      expect(res.data).toBe('not valid json string');
+      await promise1;
+
+      const promise2 = xhrAdapter({
+        url: 'https://example.com/post2',
+        headers: {},
+      });
+      expect(mockXHR.send).toHaveBeenCalledWith(null);
+      mockXHR.onload();
+      await promise2;
     });
 
     it('does nothing when onload/onerror fires after request already settled', async () => {
@@ -287,10 +293,11 @@ describe('adapters/xhr', () => {
       controller.abort();
       await expect(promise).rejects.toMatchObject({ code: 'ERR_CANCELED' });
 
-      // Calling onload / onerror / ontimeout after settle should be no-op (line 87)
+      // Calling onload / onerror / ontimeout after settle should be no-op
       expect(() => mockXHR.onload()).not.toThrow();
       expect(() => mockXHR.onerror()).not.toThrow();
       expect(() => mockXHR.ontimeout()).not.toThrow();
+      expect(() => mockXHR.onabort()).not.toThrow();
     });
   });
 });

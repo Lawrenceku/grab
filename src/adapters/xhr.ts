@@ -33,18 +33,24 @@ export const xhrAdapter: Adapter = <T = any>(
     xhr.open(method, config.url, true);
 
     const responseType = config.responseType || 'json';
-    if (responseType === 'json' || responseType === 'text' || responseType === 'arraybuffer' || responseType === 'blob') {
+    if (responseType === 'json') {
       try {
-        xhr.responseType = responseType as any;
-      } catch {
-        // Some older engines or jsdom might fail for certain responseTypes
-      }
+        xhr.responseType = 'text';
+      } catch {}
+    } else if (
+      responseType === 'arraybuffer' ||
+      responseType === 'blob' ||
+      responseType === 'text'
+    ) {
+      try {
+        xhr.responseType = responseType;
+      } catch {}
     }
 
     const headers = { ...config.headers };
     const hasAccept = Object.keys(headers).some(k => k.toLowerCase() === 'accept');
     if (!hasAccept) {
-      xhr.setRequestHeader('Accept', 'application/json');
+      xhr.setRequestHeader('Accept', 'application/json, text/plain, */*');
     }
 
     Object.entries(headers).forEach(([key, value]) => {
@@ -58,11 +64,9 @@ export const xhrAdapter: Adapter = <T = any>(
       xhr.onprogress = config.onDownloadProgress;
     }
 
-    let timeoutId: any;
     let settled = false;
 
     const cleanup = () => {
-      if (timeoutId) clearTimeout(timeoutId);
       if (config.signal) {
         config.signal.removeEventListener('abort', onAbort);
       }
@@ -88,14 +92,7 @@ export const xhrAdapter: Adapter = <T = any>(
       settled = true;
       cleanup();
 
-      let responseData: any = xhr.response !== undefined ? xhr.response : xhr.responseText;
-      if (responseType === 'json' && typeof responseData === 'string') {
-        try {
-          responseData = responseData ? JSON.parse(responseData) : null;
-        } catch {
-          // Keep raw string if JSON parsing fails
-        }
-      }
+      const responseData: any = xhr.response !== undefined ? xhr.response : xhr.responseText;
 
       resolve({
         data: responseData,
@@ -120,15 +117,15 @@ export const xhrAdapter: Adapter = <T = any>(
       reject(createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config, xhr));
     };
 
+    xhr.onabort = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(createError('Request aborted', 'ERR_CANCELED', config, xhr));
+    };
+
     if (config.timeout && config.timeout > 0) {
       xhr.timeout = config.timeout;
-      timeoutId = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        xhr.abort();
-        reject(createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config, xhr));
-      }, config.timeout);
     }
 
     try {

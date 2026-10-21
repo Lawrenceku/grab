@@ -1,27 +1,22 @@
-import { readFileSync } from 'node:fs';
 import typescript from '@rollup/plugin-typescript';
 import terser from '@rollup/plugin-terser';
 import commonjs from '@rollup/plugin-commonjs';
-import polyfillNode from 'rollup-plugin-polyfill-node';
 import resolve from '@rollup/plugin-node-resolve';
 
-const pkg = JSON.parse(readFileSync('./package.json', 'utf8'));
-
-const globals = { https: 'https', url: 'url' };
-
 export default [
+  // Browser / Edge / Worker entry
   {
     input: 'src/index.ts',
     output: [
       {
         file: 'dist/index.js',
-        format: 'cjs',
+        format: 'es',
         exports: 'named',
         sourcemap: true,
       },
       {
-        file: pkg.module || 'dist/index.esm.js',
-        format: 'es',
+        file: 'dist/index.cjs',
+        format: 'cjs',
         exports: 'named',
         sourcemap: true,
       },
@@ -31,38 +26,31 @@ export default [
         name: 'GrabAPI',
         exports: 'named',
         sourcemap: true,
-        globals,
       },
     ],
     plugins: [
       typescript({ tsconfig: './tsconfig.json' }),
-      polyfillNode(),
       resolve({
-        preferBuiltins: true,
+        browser: true,
         extensions: ['.ts', '.js'],
       }),
       commonjs(),
       terser(),
     ],
-    external: [
-      'https',
-      'url',
-      ...Object.keys(pkg.dependencies || {}),
-      ...Object.keys(pkg.peerDependencies || {}),
-    ],
   },
+  // Node entry
   {
     input: 'src/index.node.ts',
     output: [
       {
         file: 'dist/index.node.js',
-        format: 'cjs',
+        format: 'es',
         exports: 'named',
         sourcemap: true,
       },
       {
-        file: 'dist/index.node.mjs',
-        format: 'es',
+        file: 'dist/index.node.cjs',
+        format: 'cjs',
         exports: 'named',
         sourcemap: true,
       },
@@ -77,19 +65,16 @@ export default [
       terser(),
     ],
     external: [
-      'node:http',
-      'node:https',
-      'node:zlib',
-      'node:url',
-      'node:stream',
-      'node:net',
+      /^node:/,
       'http',
       'https',
       'zlib',
       'url',
       'stream',
-      ...Object.keys(pkg.dependencies || {}),
-      ...Object.keys(pkg.peerDependencies || {}),
+      'buffer',
+      'events',
+      'net',
+      'tls',
     ],
   },
 ];

@@ -21,7 +21,7 @@ describe('adapters/fetch', () => {
     }
   });
 
-  it('performs successful GET request and returns json by default', async () => {
+  it('performs successful GET request and returns raw text for json by default', async () => {
     const mockHeaders = new Headers({ 'content-type': 'application/json' });
     globalThis.fetch = jest.fn().mockResolvedValue({
       status: 200,
@@ -38,16 +38,38 @@ describe('adapters/fetch', () => {
 
     const res = await fetchAdapter(config);
     expect(res.status).toBe(200);
-    expect(res.data).toEqual({ message: 'success' });
+    expect(res.data).toBe(JSON.stringify({ message: 'success' }));
     expect(res.headers['content-type']).toBe('application/json');
     expect(globalThis.fetch).toHaveBeenCalledWith(
       'https://example.com/api',
       expect.objectContaining({
         method: 'GET',
         body: undefined,
-        headers: expect.objectContaining({ 'X-Test': '1', Accept: 'application/json' }),
+        headers: expect.objectContaining({
+          'X-Test': '1',
+          Accept: 'application/json, text/plain, */*',
+        }),
       })
     );
+  });
+
+  it('allows an optional custom fetch implementation to be injected via config', async () => {
+    const customFetch = jest.fn().mockResolvedValue({
+      status: 200,
+      statusText: 'OK',
+      headers: new Headers({ 'x-custom-engine': 'true' }),
+      text: async () => 'custom-fetch-response',
+    });
+
+    const res = await fetchAdapter({
+      url: 'https://custom.example.com',
+      headers: {},
+      fetch: customFetch,
+    });
+
+    expect(customFetch).toHaveBeenCalledWith('https://custom.example.com', expect.anything());
+    expect(res.data).toBe('custom-fetch-response');
+    expect(res.headers['x-custom-engine']).toBe('true');
   });
 
   it('performs POST request sending data as body', async () => {
@@ -60,144 +82,124 @@ describe('adapters/fetch', () => {
     } as any);
 
     const config: AdapterRequest = {
-      url: 'https://example.com/api',
-      headers: { 'Content-Type': 'application/json' },
+      url: 'https://example.com/items',
       method: 'POST',
-      data: '{"name":"bob"}',
+      headers: { 'content-type': 'application/json' },
+      data: JSON.stringify({ name: 'new item' }),
     };
 
     const res = await fetchAdapter(config);
     expect(res.status).toBe(201);
-    expect(res.data).toEqual({ id: 10 });
+    expect(res.data).toBe(JSON.stringify({ id: 10 }));
     expect(globalThis.fetch).toHaveBeenCalledWith(
-      'https://example.com/api',
+      'https://example.com/items',
       expect.objectContaining({
         method: 'POST',
-        body: '{"name":"bob"}',
+        body: JSON.stringify({ name: 'new item' }),
       })
     );
   });
 
   it('handles responseType text, arraybuffer, blob, and 204 no content', async () => {
-    // text
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers(),
-      text: async () => 'plain text output',
-    } as any);
-    const textRes = await fetchAdapter({ url: 'https://example.com', headers: {}, responseType: 'text' });
-    expect(textRes.data).toBe('plain text output');
-
-    // arraybuffer
-    const buf = new ArrayBuffer(8);
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers(),
-      arrayBuffer: async () => buf,
-    } as any);
-    const abRes = await fetchAdapter({ url: 'https://example.com', headers: {}, responseType: 'arraybuffer' });
-    expect(abRes.data).toBe(buf);
-
-    // blob
-    const blob = new Blob(['data']);
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers(),
-      blob: async () => blob,
-    } as any);
-    const blobRes = await fetchAdapter({ url: 'https://example.com', headers: {}, responseType: 'blob' });
-    expect(blobRes.data).toBe(blob);
-
-    // 204
+    // 204 No Content
     globalThis.fetch = jest.fn().mockResolvedValue({
       status: 204,
+      statusText: 'No Content',
       headers: new Headers(),
     } as any);
-    const noContentRes = await fetchAdapter({ url: 'https://example.com', headers: {} });
+
+    const noContentRes = await fetchAdapter({
+      url: 'https://example.com/204',
+      headers: {},
+    });
     expect(noContentRes.data).toBeNull();
-  });
+    expect(noContentRes.status).toBe(204);
 
-  it('handles onDownloadProgress with readable stream', async () => {
-    const encoder = new TextEncoder();
-    const chunk1 = encoder.encode('{"part":');
-    const chunk2 = encoder.encode('1}');
-    let readCount = 0;
-
-    const mockReader = {
-      read: jest.fn().mockImplementation(async () => {
-        readCount++;
-        if (readCount === 1) return { done: false, value: chunk1 };
-        if (readCount === 2) return { done: false, value: chunk2 };
-        return { done: true, value: undefined };
-      }),
-    };
-
-    const mockBody = {
-      getReader: () => mockReader,
-    };
-
-    const mockHeaders = new Headers({ 'content-length': String(chunk1.length + chunk2.length) });
+    // text responseType
     globalThis.fetch = jest.fn().mockResolvedValue({
       status: 200,
-      headers: mockHeaders,
-      body: mockBody,
+      headers: new Headers(),
+      text: async () => 'plain text response',
     } as any);
 
-    const progressEvents: any[] = [];
+    const textRes = await fetchAdapter({
+      url: 'https://example.com/text',
+      headers: {},
+      responseType: 'text',
+    });
+    expect(textRes.data).toBe('plain text response');
+
+    // arraybuffer responseType
+    const buffer = new ArrayBuffer(8);
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      arrayBuffer: async () => buffer,
+    } as any);
+
+    const abRes = await fetchAdapter({
+      url: 'https://example.com/ab',
+      headers: {},
+      responseType: 'arraybuffer',
+    });
+    expect(abRes.data).toBe(buffer);
+
+    // blob responseType
+    const mockBlob = { size: 100, type: 'application/octet-stream' };
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      status: 200,
+      headers: new Headers(),
+      blob: async () => mockBlob,
+    } as any);
+
+    const blobRes = await fetchAdapter({
+      url: 'https://example.com/blob',
+      headers: {},
+      responseType: 'blob',
+    });
+    expect(blobRes.data).toBe(mockBlob);
+  });
+
+  it('does not throw on non-2xx status (leaves validation to core)', async () => {
+    globalThis.fetch = jest.fn().mockResolvedValue({
+      status: 404,
+      statusText: 'Not Found',
+      headers: new Headers({ 'content-type': 'text/plain' }),
+      text: async () => 'Resource not found',
+    } as any);
+
     const res = await fetchAdapter({
-      url: 'https://example.com',
+      url: 'https://example.com/not-found',
       headers: {},
-      responseType: 'json',
-      onDownloadProgress: e => progressEvents.push(e),
     });
-
-    expect(progressEvents.length).toBe(2);
-    expect(res.data).toEqual({ part: 1 });
+    expect(res.status).toBe(404);
+    expect(res.data).toBe('Resource not found');
   });
 
-  it('throws ETIMEDOUT when timeout triggers', async () => {
-    jest.useFakeTimers();
+  it('maps TimeoutError to ETIMEDOUT when timeout triggers', async () => {
+    const timeoutErr = new Error('The operation timed out.');
+    timeoutErr.name = 'TimeoutError';
+    globalThis.fetch = jest.fn().mockRejectedValue(timeoutErr);
 
-    globalThis.fetch = jest.fn().mockImplementation((_url, opts) => {
-      return new Promise((_, reject) => {
-        opts.signal.addEventListener('abort', () => {
-          const err = new Error('aborted');
-          err.name = 'AbortError';
-          reject(err);
-        });
-      });
-    });
-
-    const promise = fetchAdapter({
-      url: 'https://example.com',
-      headers: {},
-      timeout: 100,
-    });
-
-    jest.advanceTimersByTime(150);
-
-    await expect(promise).rejects.toMatchObject({
+    await expect(
+      fetchAdapter({
+        url: 'https://example.com/timeout',
+        headers: {},
+        timeout: 100,
+      })
+    ).rejects.toMatchObject({
       code: 'ETIMEDOUT',
-      message: 'Request timeout after 100ms',
     });
-
-    jest.useRealTimers();
   });
 
-  it('throws ERR_CANCELED when signal is aborted', async () => {
+  it('maps AbortError to ERR_CANCELED when signal is aborted', async () => {
     const controller = new AbortController();
-    globalThis.fetch = jest.fn().mockImplementation((_url, opts) => {
-      return new Promise((_, reject) => {
-        opts.signal.addEventListener('abort', () => {
-          const err = new Error('The user aborted a request.');
-          err.name = 'AbortError';
-          reject(err);
-        });
-      });
-    });
+    const abortErr = new Error('The operation was aborted.');
+    abortErr.name = 'AbortError';
+    globalThis.fetch = jest.fn().mockRejectedValue(abortErr);
 
     const promise = fetchAdapter({
-      url: 'https://example.com',
+      url: 'https://example.com/cancel',
       headers: {},
       signal: controller.signal,
     });
@@ -206,16 +208,15 @@ describe('adapters/fetch', () => {
 
     await expect(promise).rejects.toMatchObject({
       code: 'ERR_CANCELED',
-      message: 'Request aborted',
     });
   });
 
-  it('throws ERR_NETWORK on fetch failure', async () => {
-    globalThis.fetch = jest.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+  it('throws ERR_NETWORK on general fetch failure', async () => {
+    globalThis.fetch = jest.fn().mockRejectedValue(new Error('Failed to fetch'));
 
     await expect(
       fetchAdapter({
-        url: 'https://example.com',
+        url: 'https://example.com/fail',
         headers: {},
       })
     ).rejects.toMatchObject({
@@ -225,16 +226,14 @@ describe('adapters/fetch', () => {
   });
 
   it('throws ERR_CANCELED if signal was already aborted before request', async () => {
-    globalThis.fetch = jest.fn();
     const controller = new AbortController();
     controller.abort();
 
     await expect(
       fetchAdapter({
-        url: 'https://example.com',
+        url: 'https://example.com/aborted',
         headers: {},
         signal: controller.signal,
-        timeout: 1000,
       })
     ).rejects.toMatchObject({
       code: 'ERR_CANCELED',
@@ -266,7 +265,7 @@ describe('adapters/fetch', () => {
     }
   });
 
-  it('handles stream download progress with blob and text response types', async () => {
+  it('handles stream download progress with blob, text, and arraybuffer', async () => {
     const encoder = new TextEncoder();
     const chunk = encoder.encode('raw text content');
     let readDone = false;
@@ -312,7 +311,6 @@ describe('adapters/fetch', () => {
     });
     expect(blobRes.data).toBeDefined();
 
-    // Stream with arraybuffer
     readDone = false;
     globalThis.fetch = jest.fn().mockResolvedValue({
       status: 200,
@@ -327,35 +325,5 @@ describe('adapters/fetch', () => {
       onDownloadProgress: () => {},
     });
     expect(abStreamRes.data).toBeInstanceOf(ArrayBuffer);
-
-    // Stream with invalid json
-    readDone = false;
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers(),
-      body: mockBody,
-    } as any);
-
-    const badJsonStreamRes = await fetchAdapter({
-      url: 'https://example.com',
-      headers: {},
-      responseType: 'json',
-      onDownloadProgress: () => {},
-    });
-    expect(badJsonStreamRes.data).toBe('raw text content');
-
-    // Non-stream invalid json fallback
-    globalThis.fetch = jest.fn().mockResolvedValue({
-      status: 200,
-      headers: new Headers(),
-      text: async () => 'not a valid json string',
-    } as any);
-
-    const badJsonRes = await fetchAdapter({
-      url: 'https://example.com',
-      headers: {},
-      responseType: 'json',
-    });
-    expect(badJsonRes.data).toBe('not a valid json string');
   });
 });

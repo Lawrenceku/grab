@@ -3,7 +3,7 @@ import * as https from 'node:https';
 import * as zlib from 'node:zlib';
 import { URL } from 'node:url';
 import { Buffer } from 'node:buffer';
-import { Adapter, AdapterRequest, AdapterResponse } from '../types';
+import { Adapter, AdapterRequest, AdapterResponse, GrabError } from '../types';
 import { createError } from './registry';
 
 function executeHttpRequest<T = any>(
@@ -32,7 +32,7 @@ function executeHttpRequest<T = any>(
 
     const hasAccept = Object.keys(headers).some(k => k.toLowerCase() === 'accept');
     if (!hasAccept) {
-      headers['Accept'] = 'application/json';
+      headers['Accept'] = 'application/json, text/plain, */*';
     }
 
     const method = (config.method || 'GET').toUpperCase();
@@ -43,21 +43,35 @@ function executeHttpRequest<T = any>(
     };
 
     let settled = false;
-    let timeoutId: any;
+    let timeoutId: NodeJS.Timeout | undefined;
 
     const cleanup = () => {
-      if (timeoutId) clearTimeout(timeoutId);
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+        timeoutId = undefined;
+      }
       if (config.signal) {
         config.signal.removeEventListener('abort', onAbort);
       }
     };
 
-    const onAbort = () => {
+    const fail = (error: GrabError) => {
       if (settled) return;
       settled = true;
       cleanup();
       req.destroy();
-      reject(createError('Request aborted', 'ERR_CANCELED', config, req));
+      reject(error);
+    };
+
+    const finish = (response: AdapterResponse<T>) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(response);
+    };
+
+    const onAbort = () => {
+      fail(createError('Request aborted', 'ERR_CANCELED', config, req));
     };
 
     if (config.signal) {
@@ -68,14 +82,13 @@ function executeHttpRequest<T = any>(
     }
 
     const req = requestFn(urlObj, options, (res: http.IncomingMessage) => {
-      // Redirect handling
       const statusCode = res.statusCode || 0;
+
+      // Redirect handling (301, 302, 303, 307, 308)
       if ([301, 302, 303, 307, 308].includes(statusCode) && res.headers.location) {
+        res.resume(); // drain response stream
         if (redirectCount >= 5) {
-          settled = true;
-          cleanup();
-          req.destroy();
-          return reject(
+          return fail(
             createError('Too many redirects', 'ERR_TOO_MANY_REDIRECTS', config, req)
           );
         }
@@ -89,11 +102,14 @@ function executeHttpRequest<T = any>(
           redirectUrl = new URL(redirectUrl, config.url).toString();
         }
 
-        const nextMethod =
-          [301, 302, 303].includes(statusCode) && method !== 'GET' && method !== 'HEAD'
-            ? 'GET'
-            : method;
-        const nextData = nextMethod === 'GET' ? undefined : config.data;
+        let nextMethod = method;
+        let nextData = config.data;
+
+        // Switch to GET and drop the body on 303, and on 301/302 when the method was POST
+        if (statusCode === 303 || ((statusCode === 301 || statusCode === 302) && method === 'POST')) {
+          nextMethod = 'GET';
+          nextData = undefined;
+        }
 
         const redirectedConfig: AdapterRequest = {
           ...config,
@@ -106,18 +122,12 @@ function executeHttpRequest<T = any>(
         return;
       }
 
-      let stream: any = res;
+      let stream: NodeJS.ReadableStream = res;
       const encoding = res.headers['content-encoding'];
       if (encoding === 'gzip' || encoding === 'deflate') {
         const unzip = zlib.createUnzip();
         unzip.on('error', (err: Error) => {
-          if (settled) return;
-          settled = true;
-          cleanup();
-          req.destroy();
-          reject(
-            createError(`Decompression error: ${err.message}`, 'ERR_BAD_RESPONSE', config, req)
-          );
+          fail(createError(`Decompression error: ${err.message}`, 'ERR_BAD_RESPONSE', config, req));
         });
         stream = res.pipe(unzip);
       }
@@ -141,30 +151,16 @@ function executeHttpRequest<T = any>(
       });
 
       stream.on('end', () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-
         const buffer = Buffer.concat(chunks);
         const responseType = config.responseType || 'json';
         let responseData: any;
 
         if (responseType === 'arraybuffer') {
-          const ab = new ArrayBuffer(buffer.byteLength);
-          const view = new Uint8Array(ab);
-          view.set(buffer);
-          responseData = ab;
+          responseData = buffer;
         } else if (responseType === 'blob') {
           responseData = typeof Blob !== 'undefined' ? new Blob([buffer]) : buffer;
-        } else if (responseType === 'text') {
-          responseData = buffer.toString('utf8');
         } else {
-          const text = buffer.toString('utf8');
-          try {
-            responseData = text ? JSON.parse(text) : null;
-          } catch {
-            responseData = text;
-          }
+          responseData = buffer.toString('utf8');
         }
 
         const normalizedHeaders: Record<string, string> = {};
@@ -174,7 +170,7 @@ function executeHttpRequest<T = any>(
           }
         }
 
-        resolve({
+        finish({
           data: responseData,
           status: res.statusCode || 0,
           statusText: res.statusMessage || '',
@@ -185,50 +181,36 @@ function executeHttpRequest<T = any>(
     });
 
     req.on('error', (err: Error) => {
-      if (settled) return;
-      settled = true;
-      cleanup();
-      reject(
-        createError(`Network error occurred: ${err.message}`, 'ERR_NETWORK', config, req)
-      );
+      fail(createError(`Network error occurred: ${err.message}`, 'ERR_NETWORK', config, req));
     });
 
+    // Total timeout via setTimeout (not idle socket timeout)
     if (config.timeout && config.timeout > 0) {
-      req.setTimeout(config.timeout, () => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        req.destroy();
-        reject(
-          createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config, req)
-        );
-      });
-
       timeoutId = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        cleanup();
-        req.destroy();
-        reject(
-          createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config, req)
-        );
+        fail(createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config, req));
       }, config.timeout);
     }
 
-    if (config.data) {
-      if (Buffer.isBuffer(config.data)) {
-        req.write(config.data);
-      } else if (typeof config.data === 'string') {
-        req.write(config.data);
-      } else if (typeof config.data.pipe === 'function') {
-        config.data.pipe(req);
-        return;
-      } else {
-        req.write(String(config.data));
-      }
+    // Request body: if data has .pipe, pipe it to the request; otherwise req.end(data).
+    // req.end() only accepts string | Buffer | Uint8Array — primitives like 0 or false must be
+    // converted to string first; empty string is deliberately allowed (sends empty body).
+    if (
+      config.data !== undefined &&
+      config.data !== null &&
+      typeof (config.data as any).pipe === 'function'
+    ) {
+      (config.data as any).pipe(req);
+    } else if (config.data !== undefined && config.data !== null) {
+      const body =
+        typeof config.data === 'string' ||
+        Buffer.isBuffer(config.data) ||
+        config.data instanceof Uint8Array
+          ? config.data
+          : String(config.data);
+      req.end(body);
+    } else {
+      req.end();
     }
-
-    req.end();
   });
 }
 

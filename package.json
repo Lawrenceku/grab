@@ -1,34 +1,29 @@
 {
   "name": "grab-api",
   "version": "2.0.0",
-  "main": "dist/index.js",
-  "module": "dist/index.esm.js",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
   "type": "module",
-  "types": "dist/types/index.d.ts",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/index.d.ts",
       "node": {
-        "import": "./dist/index.node.mjs",
-        "require": "./dist/index.node.js",
-        "types": "./dist/types/index.node.d.ts"
+        "import": "./dist/index.node.js",
+        "require": "./dist/index.node.cjs"
       },
-      "browser": {
-        "import": "./dist/index.esm.js",
-        "require": "./dist/index.js",
-        "types": "./dist/types/index.d.ts"
-      },
-      "default": {
-        "import": "./dist/index.esm.js",
-        "require": "./dist/index.js",
-        "types": "./dist/types/index.d.ts"
-      }
-    },
-    "./node": {
-      "import": "./dist/index.node.mjs",
-      "require": "./dist/index.node.js",
-      "types": "./dist/types/index.node.d.ts"
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
     }
   },
+  "sideEffects": [
+    "./src/index.ts",
+    "./src/index.node.ts",
+    "./dist/index.js",
+    "./dist/index.cjs",
+    "./dist/index.node.js",
+    "./dist/index.node.cjs"
+  ],
   "files": [
     "dist",
     "README.md",
@@ -36,7 +31,7 @@
   ],
   "scripts": {
     "build": "rollup -c",
-    "build:types": "tsc --emitDeclarationOnly --declaration --declarationDir dist/types",
+    "build:types": "tsc --emitDeclarationOnly --declaration --declarationDir dist",
     "clean": "rimraf dist",
     "test": "jest",
     "lint": "eslint \"**/*.{ts,tsx}\"",

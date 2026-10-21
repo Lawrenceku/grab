@@ -19,7 +19,7 @@ describe('adapters/http', () => {
         });
         req.on('end', () => {
           res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ receivedMethod: req.method, receivedBody: body || null }));
+          res.end(JSON.stringify({ receivedMethod: req.method, receivedBody: body === '' ? null : body }));
         });
         return;
       }
@@ -54,6 +54,12 @@ describe('adapters/http', () => {
 
       if (url.pathname === '/redirect-1') {
         res.writeHead(302, { Location: '/json' });
+        res.end();
+        return;
+      }
+
+      if (url.pathname === '/redirect-303') {
+        res.writeHead(303, { Location: '/json' });
         res.end();
         return;
       }
@@ -96,7 +102,7 @@ describe('adapters/http', () => {
     server.close(done);
   });
 
-  it('performs GET request and parses json response', async () => {
+  it('performs GET request and returns response data', async () => {
     const config: AdapterRequest = {
       url: `${baseURL}/json`,
       method: 'GET',
@@ -105,7 +111,7 @@ describe('adapters/http', () => {
 
     const res = await httpAdapter(config);
     expect(res.status).toBe(200);
-    expect(res.data).toEqual({ receivedMethod: 'GET', receivedBody: null });
+    expect(JSON.parse(res.data)).toEqual({ receivedMethod: 'GET', receivedBody: null });
     expect(res.headers['content-type']).toBe('application/json');
   });
 
@@ -119,13 +125,13 @@ describe('adapters/http', () => {
 
     const res = await httpAdapter(config);
     expect(res.status).toBe(200);
-    expect(res.data).toEqual({
+    expect(JSON.parse(res.data)).toEqual({
       receivedMethod: 'POST',
       receivedBody: '{"user":"alice"}',
     });
   });
 
-  it('handles responseType text and arraybuffer', async () => {
+  it('handles responseType text and arraybuffer (returning Buffer for arraybuffer)', async () => {
     const textRes = await httpAdapter({
       url: `${baseURL}/text`,
       headers: {},
@@ -138,11 +144,9 @@ describe('adapters/http', () => {
       headers: {},
       responseType: 'arraybuffer',
     });
-    expect(abRes.data.byteLength).toBe(16);
-    expect(
-      abRes.data instanceof ArrayBuffer ||
-        Object.prototype.toString.call(abRes.data) === '[object ArrayBuffer]'
-    ).toBe(true);
+    expect(Buffer.isBuffer(abRes.data)).toBe(true);
+    expect(abRes.data.length).toBe(16);
+    expect(abRes.data.toString('utf8')).toBe('hello plain text');
   });
 
   it('decompresses gzip responses', async () => {
@@ -152,7 +156,7 @@ describe('adapters/http', () => {
       responseType: 'json',
     });
     expect(res.status).toBe(200);
-    expect(res.data).toEqual({ compressed: true });
+    expect(JSON.parse(res.data)).toEqual({ compressed: true });
   });
 
   it('decompresses deflate responses', async () => {
@@ -162,7 +166,7 @@ describe('adapters/http', () => {
       responseType: 'json',
     });
     expect(res.status).toBe(200);
-    expect(res.data).toEqual({ deflated: true });
+    expect(JSON.parse(res.data)).toEqual({ deflated: true });
   });
 
   it('follows redirects', async () => {
@@ -171,7 +175,20 @@ describe('adapters/http', () => {
       headers: {},
     });
     expect(res.status).toBe(200);
-    expect(res.data.receivedMethod).toBe('GET');
+    expect(JSON.parse(res.data).receivedMethod).toBe('GET');
+  });
+
+  it('switches POST to GET and drops body on 303 redirect', async () => {
+    const res = await httpAdapter({
+      url: `${baseURL}/redirect-303`,
+      method: 'POST',
+      headers: {},
+      data: 'post-body',
+    });
+    expect(res.status).toBe(200);
+    const parsed = JSON.parse(res.data);
+    expect(parsed.receivedMethod).toBe('GET');
+    expect(parsed.receivedBody).toBeNull();
   });
 
   it('throws ERR_TOO_MANY_REDIRECTS when exceeding redirect limit', async () => {
@@ -186,7 +203,7 @@ describe('adapters/http', () => {
     });
   });
 
-  it('throws ETIMEDOUT on request timeout', async () => {
+  it('throws ETIMEDOUT on total request timeout via setTimeout', async () => {
     await expect(
       httpAdapter({
         url: `${baseURL}/delay`,
@@ -271,7 +288,7 @@ describe('adapters/http', () => {
       headers: {},
       data: stream,
     });
-    expect(streamRes.data.receivedBody).toBe('stream data');
+    expect(JSON.parse(streamRes.data).receivedBody).toBe('stream data');
 
     const bufRes = await httpAdapter({
       url: `${baseURL}/json`,
@@ -279,7 +296,7 @@ describe('adapters/http', () => {
       headers: {},
       data: Buffer.from('buffer data'),
     });
-    expect(bufRes.data.receivedBody).toBe('buffer data');
+    expect(JSON.parse(bufRes.data).receivedBody).toBe('buffer data');
 
     const blobRes = await httpAdapter({
       url: `${baseURL}/text`,
@@ -287,6 +304,32 @@ describe('adapters/http', () => {
       responseType: 'blob',
     });
     expect(blobRes.data).toBeDefined();
+  });
+
+  it('does not drop falsy request bodies (0, empty string, false)', async () => {
+    const res0 = await httpAdapter({
+      url: `${baseURL}/json`,
+      method: 'POST',
+      headers: {},
+      data: 0,
+    });
+    expect(JSON.parse(res0.data).receivedBody).toBe('0');
+
+    const resFalse = await httpAdapter({
+      url: `${baseURL}/json`,
+      method: 'POST',
+      headers: {},
+      data: false,
+    });
+    expect(JSON.parse(resFalse.data).receivedBody).toBe('false');
+
+    const resEmpty = await httpAdapter({
+      url: `${baseURL}/json`,
+      method: 'POST',
+      headers: {},
+      data: '',
+    });
+    expect(JSON.parse(resEmpty.data).receivedBody).toBeNull();
   });
 
   it('triggers onDownloadProgress and falls back to raw text on invalid json in http', async () => {
@@ -300,15 +343,5 @@ describe('adapters/http', () => {
 
     expect(progressEvents.length).toBeGreaterThan(0);
     expect(res.data).toBe('hello plain text');
-  });
-
-  it('handles number/boolean data by converting to string', async () => {
-    const res = await httpAdapter({
-      url: `${baseURL}/json`,
-      method: 'POST',
-      headers: {},
-      data: 12345 as any,
-    });
-    expect(res.data.receivedBody).toBe('12345');
   });
 });

@@ -46,6 +46,7 @@ export interface RequestConfig {
   transformRequest?: ((data: any, headers: Record<string, string>) => any)[];
   transformResponse?: ((data: any) => any)[];
   adapter?: Adapter | AdapterName | (Adapter | AdapterName)[];
+  fetch?: any;
 }
 
 export interface Response<T = any> {

@@ -1,17 +1,20 @@
 import { Adapter, AdapterRequest, AdapterResponse } from '../types';
 import { createError } from './registry';
 
+/**
+ * Fetch API transport adapter.
+ *
+ * Note: Upload progress is not supported by the Fetch API standard;
+ * use the XHR adapter when upload progress tracking is needed.
+ */
 export const fetchAdapter: Adapter = async <T = any>(
   config: AdapterRequest
 ): Promise<AdapterResponse<T>> => {
   const fetchFn =
-    typeof window !== 'undefined' && typeof window.fetch === 'function'
-      ? window.fetch
-      : typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function'
-        ? globalThis.fetch
-        : typeof fetch === 'function'
-          ? fetch
-          : undefined;
+    config.fetch ||
+    (typeof window !== 'undefined' && typeof window.fetch === 'function' ? window.fetch : undefined) ||
+    (typeof globalThis !== 'undefined' && typeof globalThis.fetch === 'function' ? globalThis.fetch : undefined) ||
+    (typeof fetch === 'function' ? fetch : undefined);
 
   if (!fetchFn) {
     throw createError('Fetch API is not available in this environment', 'ERR_NO_ADAPTER', config);
@@ -22,40 +25,72 @@ export const fetchAdapter: Adapter = async <T = any>(
 
   const hasAccept = Object.keys(headers).some(k => k.toLowerCase() === 'accept');
   if (!hasAccept) {
-    headers['Accept'] = 'application/json';
+    headers['Accept'] = 'application/json, text/plain, */*';
   }
 
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+  // Combine config.signal and AbortSignal.timeout(timeout) with AbortSignal.any().
+  // Fall back to a manual AbortController if AbortSignal.any/timeout are unavailable.
+  let signal: AbortSignal | undefined;
+  let cleanup = () => {};
   let timedOut = false;
-  let timeoutId: any;
 
-  if (config.timeout && config.timeout > 0 && controller) {
-    timeoutId = setTimeout(() => {
-      timedOut = true;
-      controller.abort();
-    }, config.timeout);
-  }
+  const hasAbortSignalAny =
+    typeof AbortSignal !== 'undefined' && typeof (AbortSignal as any).any === 'function';
+  const hasAbortSignalTimeout =
+    typeof AbortSignal !== 'undefined' && typeof (AbortSignal as any).timeout === 'function';
 
-  const onExternalAbort = () => {
-    if (controller) {
-      controller.abort();
-    }
-  };
-
-  if (config.signal) {
-    if (config.signal.aborted) {
-      if (timeoutId) clearTimeout(timeoutId);
-      throw createError('Request aborted', 'ERR_CANCELED', config);
-    }
-    config.signal.addEventListener('abort', onExternalAbort);
-  }
-
-  const cleanup = () => {
-    if (timeoutId) clearTimeout(timeoutId);
+  if (config.timeout && config.timeout > 0 && hasAbortSignalAny && hasAbortSignalTimeout) {
+    const timeoutSignal = (AbortSignal as any).timeout(config.timeout);
     if (config.signal) {
-      config.signal.removeEventListener('abort', onExternalAbort);
+      signal = (AbortSignal as any).any([config.signal, timeoutSignal]);
+    } else {
+      signal = timeoutSignal;
     }
-  };
+  } else if (config.signal && !config.timeout) {
+    signal = config.signal;
+  } else if (config.timeout && config.timeout > 0) {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : undefined;
+    if (controller) {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        const timeoutError = new Error(`Request timeout after ${config.timeout}ms`);
+        timeoutError.name = 'TimeoutError';
+        try {
+          (controller as any).abort(timeoutError);
+        } catch {
+          controller.abort();
+        }
+      }, config.timeout);
+
+      const onExternalAbort = () => {
+        controller.abort();
+      };
+
+      if (config.signal) {
+        if (config.signal.aborted) {
+          clearTimeout(timer);
+          throw createError('Request aborted', 'ERR_CANCELED', config);
+        }
+        config.signal.addEventListener('abort', onExternalAbort);
+      }
+
+      cleanup = () => {
+        clearTimeout(timer);
+        if (config.signal) {
+          config.signal.removeEventListener('abort', onExternalAbort);
+        }
+      };
+
+      signal = controller.signal;
+    }
+  } else {
+    signal = config.signal;
+  }
+
+  if (config.signal?.aborted) {
+    cleanup();
+    throw createError('Request aborted', 'ERR_CANCELED', config);
+  }
 
   try {
     const isGetOrHead = method === 'GET' || method === 'HEAD';
@@ -65,23 +100,30 @@ export const fetchAdapter: Adapter = async <T = any>(
       method,
       headers,
       body,
-      signal: controller ? controller.signal : config.signal,
+      signal,
     });
 
     cleanup();
 
-    const responseHeaders: Record<string, string> = {};
-    if (res.headers && typeof res.headers.forEach === 'function') {
-      res.headers.forEach((value, key) => {
-        responseHeaders[key.toLowerCase()] = value;
-      });
+    let responseHeaders: Record<string, string> = {};
+    if (res.headers) {
+      if (typeof Object.fromEntries === 'function' && typeof (res.headers as any).entries === 'function') {
+        const entries = Object.fromEntries((res.headers as any).entries());
+        for (const [k, v] of Object.entries(entries)) {
+          responseHeaders[k.toLowerCase()] = v as string;
+        }
+      } else if (typeof res.headers.forEach === 'function') {
+        res.headers.forEach((value: string, key: string) => {
+          responseHeaders[key.toLowerCase()] = value;
+        });
+      }
     }
 
     let responseData: any;
     const responseType = config.responseType || 'json';
 
     if (config.onDownloadProgress && res.body && typeof res.body.getReader === 'function') {
-      const contentLengthHeader = res.headers ? res.headers.get('content-length') : null;
+      const contentLengthHeader = res.headers ? (typeof res.headers.get === 'function' ? res.headers.get('content-length') : null) : null;
       const total = contentLengthHeader ? parseInt(contentLengthHeader, 10) : 0;
       let loaded = 0;
       const reader = res.body.getReader();
@@ -114,16 +156,7 @@ export const fetchAdapter: Adapter = async <T = any>(
         responseData = typeof Blob !== 'undefined' ? new Blob([fullBuffer]) : fullBuffer;
       } else {
         const decoder = new TextDecoder();
-        const text = decoder.decode(fullBuffer);
-        if (responseType === 'json') {
-          try {
-            responseData = text ? JSON.parse(text) : null;
-          } catch {
-            responseData = text;
-          }
-        } else {
-          responseData = text;
-        }
+        responseData = decoder.decode(fullBuffer);
       }
     } else {
       if (res.status === 204 || method === 'HEAD') {
@@ -132,15 +165,9 @@ export const fetchAdapter: Adapter = async <T = any>(
         responseData = await res.arrayBuffer();
       } else if (responseType === 'blob') {
         responseData = await res.blob();
-      } else if (responseType === 'text') {
-        responseData = await res.text();
       } else {
-        const text = await res.text();
-        try {
-          responseData = text ? JSON.parse(text) : null;
-        } catch {
-          responseData = text;
-        }
+        // Read text and let core parse if json
+        responseData = await res.text();
       }
     }
 
@@ -149,20 +176,33 @@ export const fetchAdapter: Adapter = async <T = any>(
       status: res.status,
       statusText: res.statusText || '',
       headers: responseHeaders,
-      request: config,
+      request: res,
     };
   } catch (err: any) {
     cleanup();
 
-    if (timedOut) {
-      throw createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config);
-    }
-    if (config.signal?.aborted || err?.name === 'AbortError') {
-      throw createError('Request aborted', 'ERR_CANCELED', config);
-    }
     if (err?.isGrabError) {
       throw err;
     }
+
+    const isTimeout =
+      timedOut ||
+      err?.name === 'TimeoutError' ||
+      (signal?.reason as any)?.name === 'TimeoutError';
+
+    if (isTimeout) {
+      throw createError(`Request timeout after ${config.timeout}ms`, 'ETIMEDOUT', config);
+    }
+
+    const isAbort =
+      err?.name === 'AbortError' ||
+      config.signal?.aborted ||
+      (signal?.aborted && !isTimeout);
+
+    if (isAbort) {
+      throw createError('Request aborted', 'ERR_CANCELED', config);
+    }
+
     throw createError(err?.message || 'Network error occurred', 'ERR_NETWORK', config);
   }
 };
