@@ -62,7 +62,11 @@ npm install grab-api
 
 # Or MCP server for AI coding assistants (Claude Desktop, Cursor, etc.)
 npm install -g grab-mcp
-# or run on demand:
+
+# 1-step guided setup:
+npx grab-mcp init
+
+# Run MCP server directly on demand:
 npx grab-mcp
 ```
 
@@ -70,9 +74,27 @@ npx grab-mcp
 
 ## AI Agent & MCP Usage
 
-### 1. Configuration File
+### 1. Guided Setup in 1 Step
 
-Define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CONFIG=/path/to/config.json`):
+Run the interactive CLI in your terminal:
+
+```bash
+npx grab-mcp init
+```
+
+This scans your workspace for API usage, detects presets (**Stripe**, **GitHub**), configures safe policies, writes `~/.config/grab-mcp/config.json` with restricted permissions (`mode: 0600`), and outputs the ready-to-copy MCP client configuration.
+
+You can also use CLI subcommands directly:
+- `npx grab-mcp add <preset>`: Add a preset instance (`stripe`, `github`)
+- `npx grab-mcp list`: View configured instances, paths, and policies
+- `npx grab-mcp remove <name>`: Remove an instance
+- `npx grab-mcp doctor`: Validate configuration and environment variables
+
+*(Note: Invoking `npx grab-mcp` with no arguments starts the MCP stdio server, preserving full compatibility with MCP clients).*
+
+### 2. Configuration File
+
+You can also manually define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CONFIG=/path/to/config.json`):
 
 ```json
 {
@@ -83,10 +105,10 @@ Define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CON
         "type": "bearer",
         "env": "STRIPE_SECRET_KEY"
       },
+      "readOnly": true,
       "allow": {
-        "methods": ["GET", "POST"],
-        "paths": ["/customers", "/customers/*", "/charges/*"],
-        "hosts": ["files.stripe.com"]
+        "methods": ["GET"],
+        "paths": ["/customers", "/customers/*", "/charges/*", "/invoices/*", "/payment_intents/*"]
       },
       "rateLimitPerMin": 60,
       "maxResponseBytes": 20000
@@ -94,13 +116,13 @@ Define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CON
     "github-read": {
       "baseURL": "https://api.github.com",
       "auth": {
-        "type": "header",
-        "headerName": "Authorization",
+        "type": "bearer",
         "env": "GITHUB_TOKEN"
       },
       "readOnly": true,
       "allow": {
-        "paths": ["/repos/*/*", "/orgs/*"]
+        "methods": ["GET"],
+        "paths": ["/repos/*/*", "/orgs/*", "/user", "/users/*"]
       }
     }
   },
@@ -113,7 +135,9 @@ Define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CON
 }
 ```
 
-### 2. Using `grab-mcp` with AI Assistants
+> **Safety Invariant:** All default presets are **read-only (`GET`)**. Mutating methods (`POST`, `PUT`, `DELETE`) require explicit operator opt-in by setting `readOnly: false` and specifying methods in `allow.methods`.
+
+### 3. Using `grab-mcp` with AI Assistants
 
 Configure `grab-mcp` in your assistant's MCP configuration (e.g. `claude_desktop_config.json` or Cursor):
 
@@ -132,6 +156,8 @@ Configure `grab-mcp` in your assistant's MCP configuration (e.g. `claude_desktop
 }
 ```
 
+> **Security Note:** Keys are passed through your client's `env` block and injected into outgoing HTTP requests by `grab-mcp`. The key value **never enters the AI prompt context or tool call inputs**.
+
 The MCP server provides two tools:
 - **`list_instances`**: Returns metadata about all available instances (name, base URL, allowed methods, paths, and `readOnly` flags). The agent never has to guess what endpoints it can reach.
 - **`request`**: Executes an HTTP request via a named instance with automatic allowlist enforcement, secret redaction, and response shaping:
@@ -141,7 +167,7 @@ The MCP server provides two tools:
   - `fields`: `["data.id", "data.email", "data.name"]` *(cuts token usage by up to 90%)*
   - `dryRun`: `true` *(validates allowlist and returns what would be sent without firing the request)*
 
-### 3. Programmatic Agent API in TypeScript
+### 4. Programmatic Agent API in TypeScript
 
 You can also use the agent features directly in your backend code:
 

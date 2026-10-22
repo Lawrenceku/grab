@@ -71,3 +71,27 @@ export {
   resetRateLimiters,
 } from './manager';
 export type { AgentRequestOptions } from './manager';
+
+// Presets
+export {
+  PRESETS,
+  getPresets,
+  getPreset,
+  listPresetNames,
+  createInstanceFromPreset,
+} from './presets';
+export type {
+  Preset,
+  PresetAuth,
+  PresetDetect,
+  PresetInstanceOptions,
+} from './presets';
+
+// Scanner
+export { scanProject } from './scanner';
+export type {
+  PresetMatch,
+  ScanOptions,
+  ScanResult,
+} from './scanner';
+

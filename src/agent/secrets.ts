@@ -16,10 +16,27 @@ const registeredSecrets = new Set<string>();
 /**
  * Register a secret value to be scrubbed by value across headers,
  * response bodies, and error messages.
+ *
+ * Automatically also registers the base64-encoded and URL-encoded forms
+ * of the secret so encoded variants are caught in API responses, error
+ * messages, query strings, and logs.
  */
 export function registerSecret(value: string): void {
   if (value && typeof value === 'string' && value.trim().length >= 2) {
-    registeredSecrets.add(value.trim());
+    const trimmed = value.trim();
+    registeredSecrets.add(trimmed);
+
+    // Also register base64-encoded form (covers Basic auth, encoded payloads)
+    const b64 = Buffer.from(trimmed).toString('base64');
+    if (b64.length >= 4) {
+      registeredSecrets.add(b64);
+    }
+
+    // Also register URL-encoded form (covers query strings, form bodies)
+    const urlEncoded = encodeURIComponent(trimmed);
+    if (urlEncoded !== trimmed && urlEncoded.length >= 4) {
+      registeredSecrets.add(urlEncoded);
+    }
   }
 }
 
