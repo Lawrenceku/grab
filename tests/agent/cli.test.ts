@@ -83,6 +83,12 @@ describe('mcp CLI binary', () => {
       expect(content.instances.stripe.auth.env).toBe('STRIPE_SECRET_KEY');
       expect(content.instances.stripe.readOnly).toBe(true);
       expect(content.instances.stripe.allow.methods).toEqual(['GET']);
+
+      // File-mode bits are only meaningful on POSIX; Windows always reports 0o666
+      if (process.platform !== 'win32') {
+        const mode = fs.statSync(configPath).mode & 0o777;
+        expect(mode).toBe(0o600);
+      }
     });
 
     it('supports custom env var via --env flag', () => {
