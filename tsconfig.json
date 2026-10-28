@@ -2,7 +2,11 @@
   "compilerOptions": {
     "target": "ES2019",
     "module": "ESNext",
-    "moduleResolution": "node",
+    "moduleResolution": "bundler",
+    "types": [
+      "jest",
+      "node"
+    ],
     "lib": [
       "ES2019",
       "DOM"
