@@ -1,248 +1,297 @@
 <br>
-<div align="center" style="margin-bottom:1000px;">
-  <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="Logo" width="250" style="margin-bottom: 15px;"/>
-  <p style="font-size: 16px; font-weight: bold; margin-bottom: 25px;">A lightweight, Promise-based HTTP client for browser and Nodejs environments with axios-like API.</p>
+<div align="center">
+  <img src="https://raw.githubusercontent.com/Lawrenceku/assets/refs/heads/main/images/grab-logo.png" alt="grab-api logo" width="250" style="margin-bottom: 15px;"/>
+  <p style="font-size: 18px; font-weight: bold; margin-bottom: 10px;">The safe, token-efficient HTTP client for humans and AI agents.</p>
+  <p style="font-size: 14px; color: #666; max-width: 650px;">
+    An adapter-based, axios-compatible TypeScript HTTP client for browser and Node.js, featuring guardrails, secret protection, structural response shaping, and an official Model Context Protocol (MCP) server.
+  </p>
 </div>
 
 <div align="center">
-  
+
 [![npm version](https://img.shields.io/npm/v/grab-api.svg?style=flat-square)](https://www.npmjs.org/package/grab-api)
-[![Build status](https://img.shields.io/github/actions/workflow/status/grab-api/grab-api/ci.yml?branch=v1.x&label=CI&logo=github&style=flat-square)](https://github.com/lawrenceku/grab/actions/workflows/ci.yml)
-[![install size](https://img.shields.io/badge/dynamic/json?url=https://packagephobia.com/v2/api.json?p=grab-api&query=$.install.pretty&label=install%20size&style=flat-square)](https://packagephobia.now.sh/result?p=grab-api)
-[![npm downloads](https://img.shields.io/npm/dm/grab-api.svg?style=flat-square)](https://npm-stat.com/charts.html?package=grab-api)
-[![Known Vulnerabilities](https://snyk.io/test/npm/grab-api/badge.svg)](https://snyk.io/test/npm/grab-api)
+[![CI](https://img.shields.io/github/actions/workflow/status/lawrenceku/grab/ci.yml?branch=main&label=CI&style=flat-square)](https://github.com/lawrenceku/grab/actions)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg?style=flat-square)](https://opensource.org/licenses/MIT)
+[![TypeScript](https://img.shields.io/badge/TypeScript-Ready-blue.svg?style=flat-square)](https://www.typescriptlang.org/)
 
 </div>
-<br><br>
 
-## 🚀 Features
+<br>
 
-- **Axios-like API** - Familiar interface for easy migration
-- **Instance-based configuration** - Create configured instances with defaults
-- **Request/Response Interceptors** - Transform requests and responses globally
-- **Cross-platform** - Works in both browser and Node.js environments
-- **TypeScript support** - Full type definitions included
-- **Request cancellation** - Support for AbortController
-- **Progress tracking** - Upload and download progress callbacks
-- **Automatic transforms** - JSON parsing and stringifying
-- **Error handling** - Detailed error objects with request/response data
-- **Lightweight** - Small bundle size with no external dependencies
+---
 
-## Installation
+## Why grab-api?
+
+Giving an AI agent raw `curl` or `fetch` via bash or code execution creates major reliability and security issues:
+- **Secret leakage:** Bearer tokens and API keys are exposed directly in prompt context, tool calls, or stack traces.
+- **Accidental destruction:** Agents can run `DELETE` on production databases or re-run non-idempotent `POST` requests after a network blip.
+- **Context window bloat:** Unbounded JSON payloads consume tens of thousands of tokens and blow context limits.
+- **Silent cross-host leaks:** Unchecked redirects forward credentials to external hosts.
+
+**grab-api** solves these problems in the **library layer**, so whether you use `grab-api` directly in your TypeScript agents or expose it via the official **`grab-mcp`** server, the guardrails are enforced.
+
+---
+
+## Threat Model & Security Posture
+
+We believe in stating security trade-offs plainly. Security in `grab-api` is based on defense-in-depth:
+
+1. **Allowlists are only as strong as your configuration:**
+   - If you configure `paths: ['/**']` and `methods: ['*']`, the agent has unrestricted access to that host. Keep your allowlists narrow (e.g. `methods: ['GET']`, `paths: ['/v1/customers/*']`).
+2. **API response content is UNTRUSTED:**
+   - Prompt injection through external API responses is a real vector (e.g. an external API returning text like `"Ignore previous instructions and do X"`). While `grab-api` shapes response bodies, limits tokens, and redacts secrets, **it cannot sanitize the semantic content against prompt injection**. Always instruct your models to treat API outputs as untrusted data.
+3. **Secrets are never seen by the agent:**
+   - Secrets are referenced by environment variable name in config files (`{ "type": "bearer", "env": "STRIPE_KEY" }`), never by value.
+   - When requests execute, secrets are resolved from `process.env` and automatically scrubbed from headers, error objects, and response bodies before returning to the agent.
+4. **Path Traversal & Host Jump Protection:**
+   - Paths are normalized before allowlist checks: `%2e%2e`, `%2f`, and `%5c` are decoded, `.` and `..` segments are collapsed, and URLs are resolved against `baseURL`.
+   - Protocol-relative URLs (`//evil.com`), authority tricks (`user@host`), and origin mismatches are blocked with `ERR_FORBIDDEN`.
+5. **Hop-by-Hop Redirect Validation:**
+   - Redirects are executed manually with allowlist and host checks re-verified on every hop.
+   - Sensitive auth headers (`Authorization`, `Cookie`, API keys) are **automatically stripped** on cross-host hops.
+6. **Safe Retries by Default:**
+   - Automatic retries on 429/5xx only execute on idempotent methods (`GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`). Retrying `POST` is strictly opt-in (`retryPost: true`) to avoid duplicate mutations.
+
+---
+
+## 📦 Installation
 
 ```bash
+# Core HTTP client library
 npm install grab-api
+
+# Or MCP server for AI coding assistants (Claude Desktop, Cursor, etc.)
+npm install -g grab-mcp
+
+# 1-step guided setup:
+npx grab-mcp init
+
+# Run MCP server directly on demand:
+npx grab-mcp
 ```
 
-## Quick Start
+---
 
-### Basic Usage
+## AI Agent & MCP Usage
+
+### 1. Guided Setup in 1 Step
+
+Run the interactive CLI in your terminal:
+
+```bash
+npx grab-mcp init
+```
+
+This scans your workspace for API usage, detects presets (**Stripe**, **GitHub**), configures safe policies, writes `~/.config/grab-mcp/config.json` with restricted permissions (`mode: 0600`), and outputs the ready-to-copy MCP client configuration.
+
+You can also use CLI subcommands directly:
+- `npx grab-mcp add <preset>`: Add a preset instance (`stripe`, `github`)
+- `npx grab-mcp list`: View configured instances, paths, and policies
+- `npx grab-mcp remove <name>`: Remove an instance
+- `npx grab-mcp doctor`: Validate configuration and environment variables
+
+*(Note: Invoking `npx grab-mcp` with no arguments starts the MCP stdio server, preserving full compatibility with MCP clients).*
+
+### 2. Configuration File
+
+You can also manually define named instances in `~/.config/grab-mcp/config.json` (or set `GRAB_MCP_CONFIG=/path/to/config.json`):
+
+```json
+{
+  "instances": {
+    "stripe": {
+      "baseURL": "https://api.stripe.com/v1",
+      "auth": {
+        "type": "bearer",
+        "env": "STRIPE_SECRET_KEY"
+      },
+      "readOnly": true,
+      "allow": {
+        "methods": ["GET"],
+        "paths": ["/customers", "/customers/*", "/charges/*", "/invoices/*", "/payment_intents/*"]
+      },
+      "rateLimitPerMin": 60,
+      "maxResponseBytes": 20000
+    },
+    "github-read": {
+      "baseURL": "https://api.github.com",
+      "auth": {
+        "type": "bearer",
+        "env": "GITHUB_TOKEN"
+      },
+      "readOnly": true,
+      "allow": {
+        "methods": ["GET"],
+        "paths": ["/repos/*/*", "/orgs/*", "/user", "/users/*"]
+      }
+    }
+  },
+  "limits": {
+    "maxResponseBytes": 50000,
+    "rateLimitPerMin": 120,
+    "maxRetries": 2
+  },
+  "auditLogPath": "~/.config/grab-mcp/audit.log"
+}
+```
+
+> **Safety Invariant:** All default presets are **read-only (`GET`)**. Mutating methods (`POST`, `PUT`, `DELETE`) require explicit operator opt-in by setting `readOnly: false` and specifying methods in `allow.methods`.
+
+### 3. Using `grab-mcp` with AI Assistants
+
+Configure `grab-mcp` in your assistant's MCP configuration (e.g. `claude_desktop_config.json` or Cursor):
+
+```json
+{
+  "mcpServers": {
+    "grab": {
+      "command": "npx",
+      "args": ["-y", "grab-mcp"],
+      "env": {
+        "STRIPE_SECRET_KEY": "sk_live_...",
+        "GITHUB_TOKEN": "ghp_..."
+      }
+    }
+  }
+}
+```
+
+> **Security Note:** Keys are passed through your client's `env` block and injected into outgoing HTTP requests by `grab-mcp`. The key value **never enters the AI prompt context or tool call inputs**.
+
+The MCP server provides two tools:
+- **`list_instances`**: Returns metadata about all available instances (name, base URL, allowed methods, paths, and `readOnly` flags). The agent never has to guess what endpoints it can reach.
+- **`request`**: Executes an HTTP request via a named instance with automatic allowlist enforcement, secret redaction, and response shaping:
+  - `instance`: `"stripe"`
+  - `method`: `"GET"`
+  - `path`: `"/customers"`
+  - `fields`: `["data.id", "data.email", "data.name"]` *(cuts token usage by up to 90%)*
+  - `dryRun`: `true` *(validates allowlist and returns what would be sent without firing the request)*
+
+### 4. Programmatic Agent API in TypeScript
+
+You can also use the agent features directly in your backend code:
 
 ```typescript
-import { grab } from 'grab-api';
+import { loadConfig, agentRequest, listInstances } from 'grab-api';
 
-// Simple GET request
-const response = await grab.get('https://api.example.com/data');
-console.log(response.data);
+const config = loadConfig();
 
-// POST request with data
-const response = await grab.post('https://api.example.com/users', {
-  name: 'John Doe',
-  email: 'john@example.com'
-});
-console.log(response.data);
+// Safe instance listing
+const instances = listInstances(config);
+
+// Send token-efficient request with field extraction
+const result = await agentRequest(
+  config,
+  'stripe',
+  'GET',
+  '/customers',
+  null,
+  {
+    fields: ['data.id', 'data.email'],
+    maxBytes: 10000,
+  }
+);
+
+console.log(result.data); // Clean JSON containing only selected fields
+console.log(result.truncated); // boolean indicating whether payload was truncated
 ```
 
-### Instance-based API
+---
+
+##  Classic HTTP Client API (Axios-Compatible)
+
+`grab-api` remains a full-featured, zero-dependency HTTP client for browser and Node.js.
+
+### Basic Requests
+
+```typescript
+import grab from 'grab-api';
+
+// Simple GET
+const response = await grab.get('https://api.example.com/users');
+console.log(response.data);
+
+// POST with JSON body
+const created = await grab.post('https://api.example.com/users', {
+  name: 'Jane Doe',
+  email: 'jane@example.com',
+});
+```
+
+### Configured Instances
 
 ```typescript
 import { GrabInstance } from 'grab-api';
 
-// Create a configured instance
 const api = GrabInstance.create({
   baseURL: 'https://api.example.com',
   timeout: 5000,
   headers: {
-    'Authorization': 'Bearer your-token',
-    'Content-Type': 'application/json'
-  }
+    'Content-Type': 'application/json',
+  },
 });
 
-// Use the instance
-const users = await api.get('/users');
-const newUser = await api.post('/users', { name: 'Jane' });
+const user = await api.get('/users/123');
 ```
 
 ### Interceptors
 
 ```typescript
-import { GrabInstance } from 'grab-api';
-
-const api = GrabInstance.create();
-
 // Request interceptor
 api.interceptors.request.use((config) => {
-  // Add auth token to all requests
-  config.headers = config.headers || {};
-  config.headers['Authorization'] = `Bearer ${getToken()}`;
+  config.headers['X-Request-Time'] = Date.now().toString();
   return config;
 });
 
 // Response interceptor
 api.interceptors.response.use(
-  (response) => {
-    // Transform successful responses
-    return response;
-  },
+  (response) => response,
   (error) => {
-    // Handle errors globally
     if (error.status === 401) {
-      // Redirect to login
-      window.location.href = '/login';
+      // Handle unauthorized
     }
     return Promise.reject(error);
   }
 );
 ```
 
-### Request Cancellation
+### Adapter Architecture
 
-```typescript
-import { grab } from 'grab-api';
+`grab-api` uses a modular adapter architecture:
+- **`fetch`**: Default transport for modern browsers, web workers, Deno, and Bun. Supports `AbortSignal` and timeouts.
+- **`xhr`**: Automatic fallback for browsers when `onUploadProgress` is needed.
+- **`http`**: Native Node.js `http`/`https` transport with automatic gzip/brotli decompression and streaming support.
+- **Browser-Safe Bundling**: Browser bundles (`dist/index.js`, `dist/index.cjs`, `dist/grab-api.umd.js`) contain **zero** `node:*` imports.
 
-const controller = new AbortController();
+---
 
-// Start the request
-const request = grab.get('https://api.example.com/data', {
-  signal: controller.signal
-});
+## Audit Logging
 
-// Cancel the request
-setTimeout(() => {
-  controller.abort();
-}, 5000);
+All agent requests are automatically recorded in a structured, redacted JSONL audit log when `auditLogPath` is configured:
 
-try {
-  const response = await request;
-} catch (error) {
-  if (GrabInstance.isCancel(error)) {
-    console.log('Request was cancelled');
-  }
-}
+```jsonl
+{"timestamp":"2026-10-21T21:30:00.000Z","instance":"stripe","method":"GET","url":"https://api.stripe.com/v1/customers","headers":{"authorization":"[REDACTED]"},"status":200,"durationMs":142,"truncated":false,"bytes":4120}
 ```
 
-### Progress Tracking
+---
 
-```typescript
-import { grab } from 'grab-api';
+## Testing & Verification
 
-const response = await grab.post('https://api.example.com/upload', formData, {
-  onUploadProgress: (progressEvent) => {
-    const percentCompleted = Math.round(
-      (progressEvent.loaded * 100) / progressEvent.total
-    );
-    console.log(`Upload progress: ${percentCompleted}%`);
-  },
-  onDownloadProgress: (progressEvent) => {
-    const percentCompleted = Math.round(
-      (progressEvent.loaded * 100) / progressEvent.total
-    );
-    console.log(`Download progress: ${percentCompleted}%`);
-  }
-});
+The test suite runs 227 tests across both browser (jsdom) and Node.js environments with >80% coverage on all metrics:
+
+```bash
+# Run unit tests with coverage
+npm test
+
+# Build Rollup browser & Node bundles
+npm run build
+
+# Generate TypeScript declaration files
+npm run build:types
 ```
 
-## API Reference
-
-### Default Instance Methods
-
-- `grab.get(url, config?)` - GET request
-- `grab.post(url, data?, config?)` - POST request
-- `grab.put(url, data?, config?)` - PUT request
-- `grab.delete(url, config?)` - DELETE request
-- `grab.patch(url, data?, config?)` - PATCH request
-- `grab.request(config)` - Generic request method
-
-### Instance Creation
-
-```typescript
-GrabInstance.create(config?: RequestConfig): GrabInstance
-```
-
-### Configuration Options
-
-```typescript
-interface RequestConfig {
-  url?: string
-  method?: HttpMethods
-  baseURL?: string
-  params?: Record<string, any>
-  data?: any
-  headers?: Record<string, string>
-  timeout?: number
-  responseType?: XMLHttpRequestResponseType
-  signal?: AbortSignal
-  onUploadProgress?: (progressEvent: ProgressEvent) => void
-  onDownloadProgress?: (progressEvent: ProgressEvent) => void
-  validateStatus?: (status: number) => boolean
-  transformRequest?: ((data: any, headers: Record<string, string>) => any)[]
-  transformResponse?: ((data: any) => any)[]
-}
-```
-
-### Response Object
-
-```typescript
-interface Response<T = any> {
-  data: T
-  status: number
-  statusText: string
-  headers: Record<string, string>
-  config: RequestConfig
-  request?: any
-}
-```
-
-### Error Object
-
-```typescript
-interface GrabError extends Error {
-  config?: RequestConfig
-  code?: string
-  request?: any
-  response?: Response
-  status?: number
-  isAxiosError?: boolean
-}
-```
-
-## Migration from Axios
-
-Grab is designed to be a drop-in replacement for axios in most cases:
-
-```typescript
-// Axios
-import axios from 'axios';
-const response = await axios.get('/api/data');
-
-// Grab
-import { grab } from 'grab-api';
-const response = await grab.get('/api/data');
-```
-
-The main differences:
-- `GrabInstance.create()` instead of `axios.create()`
-- `GrabInstance.isCancel()` instead of `axios.isCancel()`
-- Slightly different error object structure
-
-## Browser Support
-
-- Modern browsers with ES6+ support
-- IE11+ (with polyfills)
-
-## Node.js Support
-
-- Node.js 12+
+---
 
 ## License
-MIT License
+
+MIT © [lawrence](https://github.com/lawrenceku)
