@@ -1,20 +1,35 @@
 {
   "name": "grab-api",
-  "version": "2.0.0",
+  "version": "3.0.0",
+  "description": "Axios-compatible HTTP client for browser and Node.js with guardrails for AI agents: secret scrubbing, allowlists, response shaping, and an MCP server.",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "type": "module",
   "types": "./dist/index.d.ts",
+  "unpkg": "./dist/grab-api.umd.js",
+  "jsdelivr": "./dist/grab-api.umd.js",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
       "node": {
-        "import": "./dist/index.node.js",
-        "require": "./dist/index.node.cjs"
+        "import": {
+          "types": "./dist/index.node.d.ts",
+          "default": "./dist/index.node.js"
+        },
+        "require": {
+          "types": "./dist/index.node.d.ts",
+          "default": "./dist/index.node.cjs"
+        }
       },
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
-    }
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
   },
   "sideEffects": [
     "./src/index.ts",
@@ -29,34 +44,50 @@
     "README.md",
     "LICENSE"
   ],
+  "engines": {
+    "node": ">=18"
+  },
   "scripts": {
     "build": "rollup -c",
     "build:types": "tsc --emitDeclarationOnly --declaration --declarationDir dist",
+    "build:all": "npm run clean && npm run build && npm run build:types",
+    "check:types": "attw --pack .",
     "clean": "rimraf dist",
     "test": "jest",
     "lint": "eslint \"**/*.{ts,tsx}\"",
     "format": "prettier --write \"src/**/*.ts\"",
-    "prepare": "npm run clean && npm run build",
-    "prepublishOnly": "npm run lint",
+    "prepare": "npm run build:all",
+    "prepublishOnly": "npm run lint && npm test",
     "preversion": "npm run lint",
     "version": "npm run format && git add -A src",
     "postversion": "git push && git push --tags"
   },
   "keywords": [
     "http",
+    "http-client",
+    "axios",
+    "axios-alternative",
+    "fetch",
     "xhr",
     "ajax",
+    "request",
     "promise",
     "typescript",
-    "request",
-    "client",
-    "fetch",
-    "browser"
+    "browser",
+    "node",
+    "mcp",
+    "model-context-protocol",
+    "ai-agent",
+    "llm",
+    "security",
+    "secrets",
+    "allowlist",
+    "guardrails"
   ],
   "author": {
     "name": "lawrence",
     "email": "lawrencekunmilola@gmail.com",
-    "url": "https://bento.me/kingdev"
+    "url": "https://github.com/lawrenceku"
   },
   "license": "MIT",
   "repository": {
@@ -67,8 +98,8 @@
     "url": "https://github.com/lawrenceku/grab/issues"
   },
   "homepage": "https://github.com/lawrenceku/grab#readme",
-  "description": "",
   "devDependencies": {
+    "@arethetypeswrong/cli": "^0.17.0",
     "@rollup/plugin-commonjs": "^28.0.1",
     "@rollup/plugin-node-resolve": "^15.3.0",
     "@rollup/plugin-terser": "^0.4.4",
@@ -81,6 +112,7 @@
     "jest-environment-jsdom": "^29.7.0",
     "prettier": "^3.3.3",
     "rimraf": "^6.0.1",
+    "rollup": "^4.24.0",
     "rollup-plugin-polyfill-node": "^0.13.0",
     "rollup-plugin-terser": "^7.0.2",
     "rollup-plugin-typescript2": "^0.36.0",
@@ -88,6 +120,6 @@
     "typescript": "^5.6.3"
   },
   "imports": {
-    ".": "./package.json"
+    "#package": "./package.json"
   }
 }

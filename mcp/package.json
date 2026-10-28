@@ -13,7 +13,6 @@
     "grab-mcp": "./index.js"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "1.6.1",
-    "grab-api": "3.0.0"
+    "@modelcontextprotocol/sdk": "^1.32.2"
   }
 }
